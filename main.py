@@ -16,6 +16,13 @@ class Game:
         pygame.init()
         self.grid = Grid(DEFAULT_COLS, DEFAULT_ROWS)
         self.grid.load_map(1)
+        self.fullscreen = False
+        self.cell_size = CELL_SIZE
+        self.grid_ox = 0
+        self.grid_oy = 0
+        self.hud_height = HUD_HEIGHT
+        self.window_w = self.grid.cols * CELL_SIZE
+        self.window_h = self.grid.rows * CELL_SIZE + HUD_HEIGHT
         self._init_window()
 
         self.font_big = pygame.font.SysFont("consolas", 32, bold=True)
@@ -50,16 +57,44 @@ class Game:
 
     def _init_window(self):
         """Crea/actualiza la ventana según el tamaño del grid."""
-        w = self.grid.cols * CELL_SIZE
-        h = self.grid.rows * CELL_SIZE + HUD_HEIGHT
-        self.screen = pygame.display.set_mode((w, h))
+        if self.fullscreen:
+            info = pygame.display.Info()
+            self.window_w = info.current_w
+            self.window_h = info.current_h
+            self.hud_height = HUD_HEIGHT
+            available_h = max(1, self.window_h - self.hud_height)
+            self.cell_size = max(18, min(self.window_w // self.grid.cols, available_h // self.grid.rows))
+            self.grid_ox = (self.window_w - self.grid.cols * self.cell_size) // 2
+            self.grid_oy = max(0, (available_h - self.grid.rows * self.cell_size) // 2)
+            self.screen = pygame.display.set_mode((self.window_w, self.window_h), pygame.FULLSCREEN)
+        else:
+            self.cell_size = CELL_SIZE
+            self.grid_ox = 0
+            self.grid_oy = 0
+            self.hud_height = HUD_HEIGHT
+            self.window_w = self.grid.cols * self.cell_size
+            self.window_h = self.grid.rows * self.cell_size + self.hud_height
+            self.screen = pygame.display.set_mode((self.window_w, self.window_h))
         pygame.display.set_caption("Simulador de Persecución Inteligente")
 
     def _win_w(self):
-        return self.grid.cols * CELL_SIZE
+        return self.window_w
 
     def _win_h(self):
-        return self.grid.rows * CELL_SIZE + HUD_HEIGHT
+        return self.window_h
+
+    def _grid_w(self):
+        return self.grid.cols * self.cell_size
+
+    def _grid_h(self):
+        return self.grid.rows * self.cell_size
+
+    def _hud_y(self):
+        return self.grid_oy + self._grid_h()
+
+    def _toggle_fullscreen(self):
+        self.fullscreen = not self.fullscreen
+        self._init_window()
 
     # ============================================================
     # LOOP PRINCIPAL
@@ -83,6 +118,8 @@ class Game:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
+                self._toggle_fullscreen()
             elif self.state == STATE_MENU:
                 self._ev_menu(event)
             elif self.state == STATE_EDITOR:
@@ -206,35 +243,43 @@ class Game:
         self.grid.resize(cols, rows)
         self._init_window()
 
+    def _mouse_to_cell(self, pos):
+        col = (pos[0] - self.grid_ox) // self.cell_size
+        row = (pos[1] - self.grid_oy) // self.cell_size
+        return row, col
+
     def _editor_click(self, pos):
-        col = pos[0] // CELL_SIZE
-        row = pos[1] // CELL_SIZE
+        row, col = self._mouse_to_cell(pos)
         if not self.grid.is_valid(row, col):
             return
 
         if self.editor_tool == "wall":
             # No poner muro sobre jugador o enemigos
-            if (row, col) != self.grid.player_start and (row, col) not in self.grid.enemy_starts:
+            player_cells = self.grid.entity_cells(*self.grid.player_start, PLAYER_SIZE)
+            if (row, col) not in player_cells and (row, col) not in self.grid.enemy_starts:
                 self.grid.toggle_wall(row, col)
         elif self.editor_tool == "player":
-            self.grid.player_start = (row, col)
-            self.grid.set_cell(row, col, EMPTY)
+            player_cells = self.grid.entity_cells(row, col, PLAYER_SIZE)
+            if self.grid.can_place_entity(row, col, PLAYER_SIZE) and not any(cell in self.grid.enemy_starts for cell in player_cells):
+                self.grid.player_start = (row, col)
+                for pr, pc in self.grid.entity_cells(row, col, PLAYER_SIZE):
+                    self.grid.set_cell(pr, pc, EMPTY)
             self.editor_tool = "wall"
         elif self.editor_tool == "enemy":
-            self.grid.toggle_enemy(row, col)
+            if (row, col) not in self.grid.entity_cells(*self.grid.player_start, PLAYER_SIZE):
+                self.grid.toggle_enemy(row, col)
 
     def _editor_erase(self, pos):
-        col = pos[0] // CELL_SIZE
-        row = pos[1] // CELL_SIZE
+        row, col = self._mouse_to_cell(pos)
         if self.grid.is_valid(row, col):
             self.grid.set_cell(row, col, EMPTY)
             self.grid.remove_enemy(row, col)
 
     def _editor_paint(self, pos):
-        col = pos[0] // CELL_SIZE
-        row = pos[1] // CELL_SIZE
+        row, col = self._mouse_to_cell(pos)
         if self.grid.is_valid(row, col):
-            if (row, col) != self.grid.player_start and (row, col) not in self.grid.enemy_starts:
+            player_cells = self.grid.entity_cells(*self.grid.player_start, PLAYER_SIZE)
+            if (row, col) not in player_cells and (row, col) not in self.grid.enemy_starts:
                 self.grid.set_cell(row, col, WALL)
 
     # ============================================================
@@ -258,12 +303,14 @@ class Game:
 
         keys = pygame.key.get_pressed()
         self.player.handle_input(keys, self.grid, dt)
+        self.player.update_visual(dt)
 
         player_pos = self.player.get_pos()
 
         for enemy in self.enemies:
             enemy.update(self.grid, player_pos, dt)
-            if enemy.get_pos() == player_pos:
+            enemy.update_visual(dt)
+            if self.player.occupies(*enemy.get_pos()):
                 self.state = STATE_GAME_OVER
                 return
 
@@ -295,8 +342,12 @@ class Game:
 
         pygame.display.flip()
 
-    def _draw_grid(self, ox=0, oy=0, scale=1.0):
-        cell = int(CELL_SIZE * scale)
+    def _draw_grid(self, ox=None, oy=None, scale=1.0):
+        if ox is None:
+            ox = self.grid_ox
+        if oy is None:
+            oy = self.grid_oy
+        cell = int(self.cell_size * scale)
         for r in range(self.grid.rows):
             for c in range(self.grid.cols):
                 x = ox + c * cell
@@ -306,16 +357,36 @@ class Game:
                 pygame.draw.rect(self.screen, color, rect)
                 pygame.draw.rect(self.screen, GRID_LINE, rect, 1)
 
-    def _draw_cell(self, row, col, color, ox=0, oy=0, scale=1.0, shrink=4):
-        cell = int(CELL_SIZE * scale)
+    def _draw_cell(self, row, col, color, ox=None, oy=None, scale=1.0, shrink=4, size=1):
+        if ox is None:
+            ox = self.grid_ox
+        if oy is None:
+            oy = self.grid_oy
+        cell = int(self.cell_size * scale)
         x = ox + col * cell + shrink
         y = oy + row * cell + shrink
-        size = cell - shrink * 2
-        if size > 0:
-            pygame.draw.rect(self.screen, color, (x, y, size, size))
+        rect_size = cell * size - shrink * 2
+        if rect_size > 0:
+            rect = pygame.Rect(x, y, rect_size, rect_size)
+            pygame.draw.rect(self.screen, color, rect, border_radius=max(3, int(8 * scale)))
+            pygame.draw.rect(self.screen, WHITE, rect, 1, border_radius=max(3, int(8 * scale)))
 
-    def _draw_overlay(self, cells, color_rgba, ox=0, oy=0, scale=1.0):
-        cell = int(CELL_SIZE * scale)
+    def _draw_panel(self, rect, fill=(15, 15, 35), border=GRID_LINE):
+        pygame.draw.rect(self.screen, fill, rect, border_radius=8)
+        pygame.draw.rect(self.screen, border, rect, 1, border_radius=8)
+
+    def _draw_timer_bar(self, x, y, w, h):
+        pct = 0 if SURVIVAL_TIME == 0 else max(0, min(1, self.timer / SURVIVAL_TIME))
+        pygame.draw.rect(self.screen, DARK_GRAY, (x, y, w, h), border_radius=6)
+        color = ASTAR_COLOR if pct > 0.35 else DFS_COLOR
+        pygame.draw.rect(self.screen, color, (x, y, int(w * pct), h), border_radius=6)
+
+    def _draw_overlay(self, cells, color_rgba, ox=None, oy=None, scale=1.0):
+        if ox is None:
+            ox = self.grid_ox
+        if oy is None:
+            oy = self.grid_oy
+        cell = int(self.cell_size * scale)
         surf = pygame.Surface((cell, cell), pygame.SRCALPHA)
         surf.fill(color_rgba)
         for r, c in cells:
@@ -345,6 +416,8 @@ class Game:
         y = 170
         for i, (text, color) in enumerate(options):
             prefix = "▶ " if i == self.menu_selection else "  "
+            if i == self.menu_selection:
+                self._draw_panel(pygame.Rect(160, y - 6, ww - 320, 34), (24, 24, 54), color)
             c = color if i == self.menu_selection else GRAY
             self.screen.blit(self.font_med.render(prefix + text, True, c), (180, y))
             y += 36
@@ -367,19 +440,41 @@ class Game:
 
     # ---- Editor ----
 
+    def _draw_editor_hud(self, hy):
+        panel = pygame.Rect(self.grid_ox + 8, hy + 8, self._grid_w() - 16, self.hud_height - 16)
+        self._draw_panel(panel)
+
+        tool_text = f"Herramienta: {self.editor_tool.upper()}  |  Enemigos: {len(self.grid.enemy_starts)}"
+        self.screen.blit(self.font_small.render(tool_text, True, WHITE), (panel.x + 14, panel.y + 12))
+
+        line1 = "W=Muro  P=Jugador  O=Enemigo(+/-)  C=Limpiar  1/2/3=Mapas"
+        self.screen.blit(self.font_small.render(line1, True, GRAY), (panel.x + 14, panel.y + 36))
+
+        line2 = "F5=Pequeno  F6=Mediano  F7=Grande  Click der=Borrar"
+        self.screen.blit(self.font_small.render(line2, True, GRAY), (panel.x + 14, panel.y + 60))
+
+        self.screen.blit(self.font_small.render("Jugador", True, PLAYER_COLOR), (panel.x + 14, panel.y + 82))
+        self.screen.blit(self.font_small.render("Enemigo", True, DFS_COLOR), (panel.x + 110, panel.y + 82))
+
+        size_text = f"Mapa: {self.grid.cols}x{self.grid.rows}  |  F11 Pantalla completa  |  ESC Menu"
+        text = self.font_small.render(size_text, True, DARK_GRAY)
+        self.screen.blit(text, (panel.right - text.get_width() - 14, panel.y + 82))
+
     def _draw_editor(self):
         self._draw_grid()
 
         # Jugador
         pr, pc = self.grid.player_start
-        self._draw_cell(pr, pc, PLAYER_COLOR)
+        self._draw_cell(pr, pc, PLAYER_COLOR, size=PLAYER_SIZE)
 
         # Todos los enemigos
         for er, ec in self.grid.enemy_starts:
             self._draw_cell(er, ec, DFS_COLOR)
 
         # HUD
-        hy = self.grid.rows * CELL_SIZE
+        hy = self._hud_y()
+        self._draw_editor_hud(hy)
+        return
         pygame.draw.rect(self.screen, (15, 15, 35), (0, hy, self._win_w(), HUD_HEIGHT))
 
         tool_text = f"Herramienta: {self.editor_tool.upper()}  |  Enemigos: {len(self.grid.enemy_starts)}"
@@ -399,6 +494,39 @@ class Game:
 
     # ---- Juego ----
 
+    def _draw_game_hud(self, hy):
+        panel = pygame.Rect(self.grid_ox + 8, hy + 8, self._grid_w() - 16, self.hud_height - 16)
+        self._draw_panel(panel)
+
+        left_x = panel.x + 16
+        center_x = panel.centerx
+        right_x = panel.right - 16
+
+        algo_text = f"Algoritmo: {self.enemies[0].get_algorithm_name() if self.enemies else '?'}"
+        algo_color = self.enemies[0].get_color() if self.enemies else WHITE
+        self.screen.blit(self.font_med.render(algo_text, True, algo_color), (left_x, panel.y + 14))
+        self.screen.blit(self.font_small.render(f"Enemigos: {len(self.enemies)}", True, GRAY), (left_x, panel.y + 44))
+
+        timer_color = WHITE if self.timer > 10 else DFS_COLOR
+        timer_surf = self.font_med.render(f"Tiempo: {self.timer:.1f}s", True, timer_color)
+        self.screen.blit(timer_surf, (center_x - timer_surf.get_width() // 2, panel.y + 12))
+        self._draw_timer_bar(center_x - 110, panel.y + 44, 220, 12)
+
+        total_nodes = sum(e.last_result.nodes_explored for e in self.enemies if e.last_result)
+        nodes_surf = self.font_small.render(f"Nodos explorados: {total_nodes}", True, GRAY)
+        self.screen.blit(nodes_surf, (center_x - nodes_surf.get_width() // 2, panel.y + 66))
+
+        goal_surf = self.font_small.render(f"Sobrevive {SURVIVAL_TIME}s", True, GRAY)
+        self.screen.blit(goal_surf, (right_x - goal_surf.get_width(), panel.y + 18))
+        fs_surf = self.font_small.render("F11 Pantalla completa", True, DARK_GRAY)
+        self.screen.blit(fs_surf, (right_x - fs_surf.get_width(), panel.y + 44))
+
+        move_text = "Mover: WASD/Flechas + diagonales"
+        view_text = "V Camino | B Explorados | ESC Menu"
+        self.screen.blit(self.font_small.render(move_text, True, DARK_GRAY), (left_x, panel.y + 76))
+        view_surf = self.font_small.render(view_text, True, DARK_GRAY)
+        self.screen.blit(view_surf, (right_x - view_surf.get_width(), panel.y + 76))
+
     def _draw_game(self):
         self._draw_grid()
 
@@ -411,15 +539,17 @@ class Game:
                 self._draw_overlay(enemy.path, (color[0], color[1], color[2], 80))
 
         # Jugador
-        self._draw_cell(self.player.row, self.player.col, PLAYER_COLOR)
+        self._draw_cell(self.player.visual_row, self.player.visual_col, PLAYER_COLOR, size=self.player.size)
 
         # Enemigos
         for enemy in self.enemies:
-            self._draw_cell(enemy.row, enemy.col, enemy.get_color())
+            self._draw_cell(enemy.visual_row, enemy.visual_col, enemy.get_color())
 
         # HUD
-        hy = self.grid.rows * CELL_SIZE
-        pygame.draw.rect(self.screen, (15, 15, 35), (0, hy, self._win_w(), HUD_HEIGHT))
+        hy = self._hud_y()
+        self._draw_game_hud(hy)
+        return
+        self._draw_panel(pygame.Rect(8, hy + 8, self._win_w() - 16, HUD_HEIGHT - 16))
 
         # Algoritmo
         algo_text = f"Algoritmo: {self.enemies[0].get_algorithm_name() if self.enemies else '?'}"
@@ -437,6 +567,7 @@ class Game:
             self.font_med.render(f"Tiempo: {self.timer:.1f}s", True, timer_color),
             (self._win_w() // 2 - 50, hy + 5)
         )
+        self._draw_timer_bar(self._win_w() // 2 - 90, hy + 38, 180, 10)
 
         # Nodos
         total_nodes = sum(e.last_result.nodes_explored for e in self.enemies if e.last_result)
@@ -461,9 +592,9 @@ class Game:
     def _draw_gameover(self, won):
         self._draw_grid()
         if self.player:
-            self._draw_cell(self.player.row, self.player.col, PLAYER_COLOR)
+            self._draw_cell(self.player.visual_row, self.player.visual_col, PLAYER_COLOR, size=self.player.size)
         for enemy in self.enemies:
-            self._draw_cell(enemy.row, enemy.col, enemy.get_color())
+            self._draw_cell(enemy.visual_row, enemy.visual_col, enemy.get_color())
 
         overlay = pygame.Surface((self._win_w(), self._win_h()), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 160))
@@ -510,7 +641,7 @@ class Game:
 
         # 3 mini grids animados
         mini_scale = 0.3
-        mini_cell = int(CELL_SIZE * mini_scale)
+        mini_cell = int(self.cell_size * mini_scale)
         grid_w = self.grid.cols * mini_cell
         spacing = (self._win_w() - 3 * grid_w) // 4
 
@@ -534,7 +665,7 @@ class Game:
                 self._draw_overlay(result.path, (color[0], color[1], color[2], 140), ox, oy, mini_scale)
 
             # Inicio y fin
-            self._draw_cell(start[0], start[1], PLAYER_COLOR, ox, oy, mini_scale, 2)
+            self._draw_cell(start[0], start[1], PLAYER_COLOR, ox, oy, mini_scale, 2, PLAYER_SIZE)
             self._draw_cell(goal[0], goal[1], color, ox, oy, mini_scale, 2)
 
             # Estadísticas debajo
@@ -600,9 +731,9 @@ class Game:
         goal = self.grid.enemy_starts[0] if self.grid.enemy_starts else (self.grid.rows - 2, self.grid.cols - 2)
 
         self.analysis_results = [
-            ("DFS", dfs(self.grid, start, goal), DFS_COLOR),
-            ("Dijkstra", dijkstra(self.grid, start, goal), DIJKSTRA_COLOR),
-            ("A*", astar(self.grid, start, goal), ASTAR_COLOR),
+            ("DFS", dfs(self.grid, start, goal, PLAYER_SIZE), DFS_COLOR),
+            ("Dijkstra", dijkstra(self.grid, start, goal, PLAYER_SIZE), DIJKSTRA_COLOR),
+            ("A*", astar(self.grid, start, goal, PLAYER_SIZE), ASTAR_COLOR),
         ]
 
         # Máximo de pasos = el algoritmo que más nodos exploró

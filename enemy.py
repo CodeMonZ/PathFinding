@@ -12,7 +12,7 @@
 # ============================================================
 
 from constants import (
-    ENEMY_SPEEDS, RECALC_STEPS,
+    ENEMY_SPEEDS, ENTITY_LERP_SPEED, RECALC_STEPS,
     DFS_COLOR, DIJKSTRA_COLOR, ASTAR_COLOR
 )
 from pathfinding import dfs, dijkstra, astar
@@ -24,6 +24,8 @@ class Enemy:
     def __init__(self, row, col, algorithm="dfs"):
         self.row = row
         self.col = col
+        self.visual_row = float(row)
+        self.visual_col = float(col)
         self.algorithm = algorithm
         self.move_timer = 0
 
@@ -92,6 +94,11 @@ class Enemy:
 
         self.steps_taken += 1
         self.move_timer = self.get_move_delay()
+
+    def update_visual(self, dt):
+        amount = min(1.0, ENTITY_LERP_SPEED * dt / 1000.0)
+        self.visual_row += (self.row - self.visual_row) * amount
+        self.visual_col += (self.col - self.visual_col) * amount
 
     def get_pos(self):
         return (self.row, self.col)

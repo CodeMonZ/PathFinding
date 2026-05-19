@@ -6,9 +6,10 @@
 DEFAULT_COLS = 20
 DEFAULT_ROWS = 15
 CELL_SIZE = 40
+PLAYER_SIZE = 2
 
 # --- Ventana ---
-HUD_HEIGHT = 80
+HUD_HEIGHT = 112
 
 # --- Colores (R, G, B) ---
 BLACK      = (10, 10, 26)
@@ -27,6 +28,7 @@ ASTAR_COLOR    = (46, 213, 115)
 # --- Velocidades (milisegundos entre movimientos) ---
 FPS = 60
 PLAYER_MOVE_DELAY = 120
+ENTITY_LERP_SPEED = 14
 
 ENEMY_SPEEDS = {
     "dfs":      200,

@@ -56,7 +56,7 @@ def _reconstruct_path(parent, goal):
 # - El camino suele ser largo y dar vueltas innecesarias
 # ============================================================
 
-def dfs(grid, start, goal):
+def dfs(grid, start, goal, size=1):
     """
     Búsqueda en profundidad.
     Encuentra UN camino (no el más corto).
@@ -77,7 +77,7 @@ def dfs(grid, start, goal):
             break
 
         # Vecinos en orden fijo: arriba, abajo, izq, der
-        for neighbor in grid.get_neighbors(*current):
+        for neighbor in grid.get_neighbors(*current, size):
             if neighbor not in visited:
                 visited.add(neighbor)
                 parent[neighbor] = current
@@ -96,7 +96,7 @@ def dfs(grid, start, goal):
 # - Explora muchos nodos de forma uniforme
 # ============================================================
 
-def dijkstra(grid, start, goal):
+def dijkstra(grid, start, goal, size=1):
     """
     Algoritmo de Dijkstra.
     Camino más corto garantizado.
@@ -122,8 +122,9 @@ def dijkstra(grid, start, goal):
             result.path = _reconstruct_path(parent, goal)
             break
 
-        for neighbor in grid.get_neighbors(*current):
-            new_cost = current_cost + 1
+        for neighbor in grid.get_neighbors(*current, size):
+            move_cost = 1.4 if neighbor[0] != current[0] and neighbor[1] != current[1] else 1
+            new_cost = current_cost + move_cost
 
             if neighbor not in cost or new_cost < cost[neighbor]:
                 cost[neighbor] = new_cost
@@ -143,11 +144,13 @@ def dijkstra(grid, start, goal):
 # ============================================================
 
 def heuristic(a, b):
-    """Distancia Manhattan entre dos celdas."""
-    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+    """Distancia octil entre dos celdas."""
+    dr = abs(a[0] - b[0])
+    dc = abs(a[1] - b[1])
+    return max(dr, dc) + 0.4 * min(dr, dc)
 
 
-def astar(grid, start, goal):
+def astar(grid, start, goal, size=1):
     """
     Algoritmo A*.
     Camino óptimo con menor exploración.
@@ -174,8 +177,9 @@ def astar(grid, start, goal):
             result.path = _reconstruct_path(parent, goal)
             break
 
-        for neighbor in grid.get_neighbors(*current):
-            tentative_g = g_score[current] + 1
+        for neighbor in grid.get_neighbors(*current, size):
+            move_cost = 1.4 if neighbor[0] != current[0] and neighbor[1] != current[1] else 1
+            tentative_g = g_score[current] + move_cost
 
             if neighbor not in g_score or tentative_g < g_score[neighbor]:
                 g_score[neighbor] = tentative_g
