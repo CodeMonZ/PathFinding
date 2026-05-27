@@ -1,71 +1,53 @@
 # ============================================================
-# player.py — Entidad del jugador
+# player.py - Entidad del jugador
 # ============================================================
 
 import pygame
-from constants import PLAYER_MOVE_DELAY
+from constants import ENTITY_LERP_SPEED, PLAYER_MOVE_DELAY, PLAYER_SIZE
 
 
 class Player:
     """
     El jugador se mueve con WASD o flechas.
-    Solo puede moverse a celdas caminables.
+    Solo se mueve en 4 direcciones.
     """
 
     def __init__(self, row, col):
         self.row = row
         self.col = col
-        self.move_timer = 0  # Tiempo restante antes del próximo movimiento
-        # Posición visual para movimiento suave
+        self.size = PLAYER_SIZE
+        self.move_timer = 0
         self.visual_row = float(row)
         self.visual_col = float(col)
 
     def handle_input(self, keys, grid, dt):
-        """
-        Lee el teclado y mueve al jugador si es posible.
-        dt = tiempo transcurrido en milisegundos.
-        """
-        # Esperar antes de permitir otro movimiento
         self.move_timer -= dt
         if self.move_timer > 0:
             return
 
-        moved = False
-
-        # Arriba
         if keys[pygame.K_UP] or keys[pygame.K_w]:
-            if grid.is_walkable(self.row - 1, self.col):
-                self.row -= 1
-                moved = True
-
-        # Abajo
+            dr, dc = -1, 0
         elif keys[pygame.K_DOWN] or keys[pygame.K_s]:
-            if grid.is_walkable(self.row + 1, self.col):
-                self.row += 1
-                moved = True
-
-        # Izquierda
+            dr, dc = 1, 0
         elif keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            if grid.is_walkable(self.row, self.col - 1):
-                self.col -= 1
-                moved = True
-
-        # Derecha
+            dr, dc = 0, -1
         elif keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            if grid.is_walkable(self.row, self.col + 1):
-                self.col += 1
-                moved = True
+            dr, dc = 0, 1
+        else:
+            return
 
-        if moved:
+        if grid.can_move_entity(self.row, self.col, dr, dc, self.size):
+            self.row += dr
+            self.col += dc
             self.move_timer = PLAYER_MOVE_DELAY
 
     def get_pos(self):
-        """Retorna la posición actual como tupla (row, col)."""
         return (self.row, self.col)
 
+    def occupies(self, row, col):
+        return self.row <= row < self.row + self.size and self.col <= col < self.col + self.size
+
     def update_visual(self, dt):
-        """Interpola la posición visual hacia la posición lógica."""
-        lerp_speed = 15.0  # Factor de suavizado por segundo
-        t = min(1.0, lerp_speed * dt / 1000.0)
-        self.visual_row += (self.row - self.visual_row) * t
-        self.visual_col += (self.col - self.visual_col) * t
+        amount = min(1.0, ENTITY_LERP_SPEED * dt / 1000.0)
+        self.visual_row += (self.row - self.visual_row) * amount
+        self.visual_col += (self.col - self.visual_col) * amount

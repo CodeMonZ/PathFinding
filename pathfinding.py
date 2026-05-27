@@ -1,29 +1,27 @@
 # ============================================================
-# pathfinding.py — Algoritmos de búsqueda en grafos
+# pathfinding.py - Algoritmos de busqueda en grafos
 # ============================================================
 #
-# Tres algoritmos, cada uno con comportamiento diferente:
-#   DFS      → explora profundo, caminos NO óptimos
-#   Dijkstra → camino más corto garantizado
-#   A*       → camino óptimo con menos exploración
-#
-# Todos retornan un PathResult con:
-#   - path:     lista de celdas del camino final
-#   - explored: lista de celdas visitadas (para visualización)
-#
+# Reglas implementadas:
+# - explored son nodos visitados por la busqueda.
+# - path es SOLO el camino reconstruido con parent al llegar a la meta.
+# - Los movimientos son solo 4 direcciones.
+# - Cada movimiento cuesta 10.
+# - A* usa heuristica Manhattan.
 # ============================================================
 
 import heapq
 import time as _time
 
 
+STRAIGHT_COST = 10
+
+
 def _timer():
-    """Timer de alta precisión (nanosegundos)."""
     return _time.perf_counter_ns()
 
 
 def _elapsed_ms(start_ns):
-    """Milisegundos transcurridos."""
     return (_time.perf_counter_ns() - start_ns) / 1_000_000
 
 
@@ -35,10 +33,11 @@ class PathResult:
         self.explored = []
         self.nodes_explored = 0
         self.time_ms = 0.0
+        self.total_cost = 0
 
 
 def _reconstruct_path(parent, goal):
-    """Reconstruye el camino desde goal hasta inicio."""
+    """Reconstruye el camino desde goal hasta inicio usando parent."""
     path = []
     current = goal
     while current is not None:
@@ -48,40 +47,132 @@ def _reconstruct_path(parent, goal):
     return path
 
 
+def _move_cost(a, b):
+    return STRAIGHT_COST
+
+
+def _path_cost(path):
+    return sum(_move_cost(a, b) for a, b in zip(path, path[1:]))
+
+
+def _finish(result, parent, goal, cost=None):
+    result.path = _reconstruct_path(parent, goal)
+    result.total_cost = _path_cost(result.path) if cost is None else cost
+
+
+def _as_goals(goal):
+    if isinstance(goal, tuple) and len(goal) == 2 and all(isinstance(value, int) for value in goal):
+        return {goal}
+    return set(goal)
+
+
+def _tree_path_between(parent, start, goal):
+    """Camino entre dos nodos ya conocidos dentro del arbol de busqueda."""
+    if start not in parent or goal not in parent:
+        return []
+
+    start_chain = []
+    current = start
+    while current is not None:
+        start_chain.append(current)
+        current = parent[current]
+
+    goal_chain = []
+    current = goal
+    while current is not None:
+        goal_chain.append(current)
+        current = parent[current]
+
+    start_index = {node: index for index, node in enumerate(start_chain)}
+    lca = None
+    goal_lca_index = 0
+    for index, node in enumerate(goal_chain):
+        if node in start_index:
+            lca = node
+            goal_lca_index = index
+            break
+
+    if lca is None:
+        return []
+
+    up_to_lca = start_chain[:start_index[lca] + 1]
+    down_to_goal = list(reversed(goal_chain[:goal_lca_index]))
+    return up_to_lca + down_to_goal
+
+
+def heuristic(a, b):
+    """Heuristica Manhattan para movimiento en 4 direcciones."""
+    dy = abs(a[0] - b[0])
+    dx = abs(a[1] - b[1])
+    return STRAIGHT_COST * (dx + dy)
+
+
+def _heuristic_to_goals(node, goals):
+    return min(heuristic(node, goal) for goal in goals)
+
+
+def _dfs_neighbors(grid, start, current, size):
+    def sweep_rank(node):
+        row, col = node
+        if row < start[0]:
+            return grid.rows * grid.cols + (start[0] - row) * grid.cols + col
+        row_delta = row - start[0]
+        going_right = row_delta % 2 == 0
+        if row_delta == 0:
+            if col >= start[1]:
+                return col - start[1]
+            return grid.cols + col
+        if going_right:
+            return row_delta * grid.cols + col
+        return row_delta * grid.cols + (grid.cols - 1 - col)
+
+    neighbors = grid.get_neighbors(*current, size)
+    return sorted(neighbors, key=sweep_rank)
+
+
 # ============================================================
 # NIVEL 1: DFS (Depth-First Search)
 # ============================================================
-# - Usa PILA (stack) → explora profundo antes de retroceder
-# - Encuentra UN camino, pero generalmente NO el más corto
-# - El camino suele ser largo y dar vueltas innecesarias
-# ============================================================
 
-def dfs(grid, start, goal):
+def dfs(grid, start, goal, size=1):
     """
-    Búsqueda en profundidad.
-    Encuentra UN camino (no el más corto).
+    DFS real:
+    - usa stack
+    - marca visitado al meter en la pila
+    - guarda parent
+    - reconstruye el camino final solo al encontrar la meta
     """
     result = PathResult()
     t0 = _timer()
 
+    goals = _as_goals(goal)
+    if not grid.can_place_entity(*start, size) or not any(grid.can_place_entity(*node, size) for node in goals):
+        result.time_ms = _elapsed_ms(t0)
+        return result
+
     stack = [start]
     visited = {start}
     parent = {start: None}
+    found = False
 
     while stack:
         current = stack.pop()
         result.explored.append(current)
 
-        if current == goal:
-            result.path = _reconstruct_path(parent, goal)
+        if current in goals:
+            found = True
+            goal = current
             break
 
-        # Vecinos en orden fijo: arriba, abajo, izq, der
-        for neighbor in grid.get_neighbors(*current):
+        # Stack = LIFO, por eso se empuja en reversa.
+        for neighbor in reversed(_dfs_neighbors(grid, start, current, size)):
             if neighbor not in visited:
                 visited.add(neighbor)
                 parent[neighbor] = current
                 stack.append(neighbor)
+
+    if found:
+        _finish(result, parent, goal)
 
     result.time_ms = _elapsed_ms(t0)
     result.nodes_explored = len(result.explored)
@@ -91,44 +182,50 @@ def dfs(grid, start, goal):
 # ============================================================
 # NIVEL 2: Dijkstra
 # ============================================================
-# - Usa COLA DE PRIORIDAD (min-heap)
-# - GARANTIZA el camino más corto
-# - Explora muchos nodos de forma uniforme
-# ============================================================
 
-def dijkstra(grid, start, goal):
-    """
-    Algoritmo de Dijkstra.
-    Camino más corto garantizado.
-    """
+def dijkstra(grid, start, goal, size=1):
+    """Dijkstra con min-heap, distancias y parent map."""
     result = PathResult()
     t0 = _timer()
 
-    heap = [(0, start)]
-    cost = {start: 0}
+    goals = _as_goals(goal)
+    if not grid.can_place_entity(*start, size) or not any(grid.can_place_entity(*node, size) for node in goals):
+        result.time_ms = _elapsed_ms(t0)
+        return result
+
+    distances = {start: 0}
     parent = {start: None}
     visited = set()
+    heap = [(0, 0, start)]
+    tie_breaker = 1
+    found = False
 
     while heap:
-        current_cost, current = heapq.heappop(heap)
+        current_distance, _, current = heapq.heappop(heap)
 
         if current in visited:
+            continue
+        if current_distance != distances.get(current, float("inf")):
             continue
 
         visited.add(current)
         result.explored.append(current)
 
-        if current == goal:
-            result.path = _reconstruct_path(parent, goal)
+        if current in goals:
+            found = True
+            goal = current
             break
 
-        for neighbor in grid.get_neighbors(*current):
-            new_cost = current_cost + 1
-
-            if neighbor not in cost or new_cost < cost[neighbor]:
-                cost[neighbor] = new_cost
+        for neighbor in grid.get_neighbors(*current, size):
+            new_distance = current_distance + _move_cost(current, neighbor)
+            if new_distance < distances.get(neighbor, float("inf")):
+                distances[neighbor] = new_distance
                 parent[neighbor] = current
-                heapq.heappush(heap, (new_cost, neighbor))
+                heapq.heappush(heap, (new_distance, tie_breaker, neighbor))
+                tie_breaker += 1
+
+    if found:
+        _finish(result, parent, goal, distances[goal])
 
     result.time_ms = _elapsed_ms(t0)
     result.nodes_explored = len(result.explored)
@@ -138,50 +235,53 @@ def dijkstra(grid, start, goal):
 # ============================================================
 # NIVEL 3: A* (A-Star)
 # ============================================================
-# - f(n) = g(n) + h(n)  con heurística Manhattan
-# - Camino ÓPTIMO con MENOS exploración que Dijkstra
-# ============================================================
 
-def heuristic(a, b):
-    """Distancia Manhattan entre dos celdas."""
-    return abs(a[0] - b[0]) + abs(a[1] - b[1])
-
-
-def astar(grid, start, goal):
-    """
-    Algoritmo A*.
-    Camino óptimo con menor exploración.
-    """
+def astar(grid, start, goal, size=1):
+    """A* con f(n)=g(n)+h(n), heuristica Manhattan y control de duplicados."""
     result = PathResult()
     t0 = _timer()
 
+    goals = _as_goals(goal)
+    if not grid.can_place_entity(*start, size) or not any(grid.can_place_entity(*node, size) for node in goals):
+        result.time_ms = _elapsed_ms(t0)
+        return result
+
     g_score = {start: 0}
-    f_score = heuristic(start, goal)
-    heap = [(f_score, start)]
     parent = {start: None}
     visited = set()
+    start_h = _heuristic_to_goals(start, goals)
+    heap = [(start_h, start_h, 0, 0, start)]
+    tie_breaker = 1
+    found = False
 
     while heap:
-        current_f, current = heapq.heappop(heap)
+        current_f, current_h, current_g, _, current = heapq.heappop(heap)
 
         if current in visited:
+            continue
+        if current_g != g_score.get(current, float("inf")):
             continue
 
         visited.add(current)
         result.explored.append(current)
 
-        if current == goal:
-            result.path = _reconstruct_path(parent, goal)
+        if current in goals:
+            found = True
+            goal = current
             break
 
-        for neighbor in grid.get_neighbors(*current):
-            tentative_g = g_score[current] + 1
-
-            if neighbor not in g_score or tentative_g < g_score[neighbor]:
-                g_score[neighbor] = tentative_g
-                f = tentative_g + heuristic(neighbor, goal)
+        for neighbor in grid.get_neighbors(*current, size):
+            tentative_g = current_g + _move_cost(current, neighbor)
+            if tentative_g < g_score.get(neighbor, float("inf")):
                 parent[neighbor] = current
-                heapq.heappush(heap, (f, neighbor))
+                g_score[neighbor] = tentative_g
+                h_score = _heuristic_to_goals(neighbor, goals)
+                f_score = tentative_g + h_score
+                heapq.heappush(heap, (f_score, h_score, tentative_g, tie_breaker, neighbor))
+                tie_breaker += 1
+
+    if found:
+        _finish(result, parent, goal, g_score[goal])
 
     result.time_ms = _elapsed_ms(t0)
     result.nodes_explored = len(result.explored)
@@ -191,33 +291,23 @@ def astar(grid, start, goal):
 # ============================================================
 # EXPLORADORES CIEGOS (paso a paso, sin goal)
 # ============================================================
-#
-# Usados por los enemigos en el juego.
-# NO saben dónde está el jugador.
-# En cada llamada a step() expanden UN nodo y retornan
-# la celda a la que el enemigo debe moverse.
-#
-# ============================================================
 
 class DFSExplorer:
     """
-    Exploración DFS paso a paso, SIN goal conocido.
-    Usa una PILA (stack). El enemigo se mueve al nodo
-    que hace pop del stack en cada turno.
+    Exploracion DFS paso a paso, SIN goal conocido.
+    Usa una PILA (stack). El enemigo se mueve al nodo que hace pop.
     """
 
     def __init__(self, grid, start):
         self.grid = grid
+        self.start = start
         self.stack = [start]
         self.visited = {start}
-        self.explored = []        # historial para visualización
+        self.parent = {start: None}
+        self.explored = []
         self.finished = False
 
     def step(self):
-        """
-        Expande un nodo del stack y retorna la celda.
-        Retorna None si ya no hay nodos por explorar.
-        """
         if not self.stack:
             self.finished = True
             return None
@@ -225,52 +315,61 @@ class DFSExplorer:
         current = self.stack.pop()
         self.explored.append(current)
 
-        for neighbor in self.grid.get_neighbors(*current):
+        for neighbor in reversed(_dfs_neighbors(self.grid, self.start, current, 1)):
             if neighbor not in self.visited:
                 self.visited.add(neighbor)
+                self.parent[neighbor] = current
                 self.stack.append(neighbor)
 
         return current
 
     def reset(self, start):
-        """Reinicia la exploración desde una nueva posición."""
+        self.start = start
         self.stack = [start]
         self.visited = {start}
+        self.parent = {start: None}
         self.explored = []
         self.finished = False
+
+    def path_between(self, start, goal):
+        return _tree_path_between(self.parent, start, goal)
 
 
 class DijkstraExplorer:
     """
-    Exploración Dijkstra paso a paso, SIN goal conocido.
-    Usa un MIN-HEAP (cola de prioridad). El enemigo se mueve
-    al nodo de menor costo acumulado en cada turno.
+    Exploracion Dijkstra paso a paso, SIN goal conocido.
+    Usa min-heap y desempate por orden de insercion.
     """
 
     def __init__(self, grid, start):
         self.grid = grid
-        self.heap = [(0, start)]
+        self.heap = [(0, 0, start)]
+        self.distances = {start: 0}
+        self.parent = {start: None}
+        self.tie_breaker = 1
         self.visited = set()
-        self.explored = []        # historial para visualización
+        self.explored = []
         self.finished = False
 
     def step(self):
-        """
-        Expande el nodo de menor costo del heap y retorna la celda.
-        Retorna None si ya no hay nodos por explorar.
-        """
         while self.heap:
-            cost, current = heapq.heappop(self.heap)
+            cost, _, current = heapq.heappop(self.heap)
 
             if current in self.visited:
+                continue
+            if cost != self.distances.get(current, float("inf")):
                 continue
 
             self.visited.add(current)
             self.explored.append(current)
 
-            for neighbor in self.grid.get_neighbors(*current):
-                if neighbor not in self.visited:
-                    heapq.heappush(self.heap, (cost + 1, neighbor))
+            for neighbor in self.grid.get_neighbors(*current, 1):
+                new_cost = cost + _move_cost(current, neighbor)
+                if new_cost < self.distances.get(neighbor, float("inf")):
+                    self.distances[neighbor] = new_cost
+                    self.parent[neighbor] = current
+                    heapq.heappush(self.heap, (new_cost, self.tie_breaker, neighbor))
+                    self.tie_breaker += 1
 
             return current
 
@@ -278,8 +377,13 @@ class DijkstraExplorer:
         return None
 
     def reset(self, start):
-        """Reinicia la exploración desde una nueva posición."""
-        self.heap = [(0, start)]
+        self.heap = [(0, 0, start)]
+        self.distances = {start: 0}
+        self.parent = {start: None}
+        self.tie_breaker = 1
         self.visited = set()
         self.explored = []
         self.finished = False
+
+    def path_between(self, start, goal):
+        return _tree_path_between(self.parent, start, goal)

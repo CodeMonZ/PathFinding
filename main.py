@@ -207,14 +207,19 @@ class Game:
 
         if self.editor_tool == "wall":
             # No poner muro sobre jugador o enemigos
-            if (row, col) != self.grid.player_start and (row, col) not in self.grid.enemy_starts:
+            player_cells = self.grid.entity_cells(*self.grid.player_start, PLAYER_SIZE)
+            if (row, col) not in player_cells and (row, col) not in self.grid.enemy_starts:
                 self.grid.toggle_wall(row, col)
         elif self.editor_tool == "player":
-            self.grid.player_start = (row, col)
-            self.grid.set_cell(row, col, EMPTY)
-            self.editor_tool = "wall"
+            player_cells = self.grid.entity_cells(row, col, PLAYER_SIZE)
+            if self.grid.can_place_entity(row, col, PLAYER_SIZE) and not any(cell in self.grid.enemy_starts for cell in player_cells):
+                self.grid.player_start = (row, col)
+                for pr, pc in player_cells:
+                    self.grid.set_cell(pr, pc, EMPTY)
+                self.editor_tool = "wall"
         elif self.editor_tool == "enemy":
-            self.grid.toggle_enemy(row, col)
+            if (row, col) not in self.grid.entity_cells(*self.grid.player_start, PLAYER_SIZE):
+                self.grid.toggle_enemy(row, col)
 
     def _editor_erase(self, pos):
         col = pos[0] // CELL_SIZE
@@ -227,7 +232,8 @@ class Game:
         col = pos[0] // CELL_SIZE
         row = pos[1] // CELL_SIZE
         if self.grid.is_valid(row, col):
-            if (row, col) != self.grid.player_start and (row, col) not in self.grid.enemy_starts:
+            player_cells = self.grid.entity_cells(*self.grid.player_start, PLAYER_SIZE)
+            if (row, col) not in player_cells and (row, col) not in self.grid.enemy_starts:
                 self.grid.set_cell(row, col, WALL)
 
     # ============================================================
@@ -260,7 +266,7 @@ class Game:
             occupied = {e.get_pos() for j, e in enumerate(self.enemies) if j != i}
             enemy.update(self.grid, player_pos, dt, occupied)
             enemy.update_visual(dt)
-            if enemy.get_pos() == player_pos:
+            if self.player.occupies(*enemy.get_pos()):
                 self.state = STATE_GAME_OVER
                 return
 
@@ -303,17 +309,17 @@ class Game:
                 pygame.draw.rect(self.screen, color, rect)
                 pygame.draw.rect(self.screen, GRID_LINE, rect, 1)
 
-    def _draw_cell(self, row, col, color, ox=0, oy=0, scale=1.0, shrink=4, text=None):
+    def _draw_cell(self, row, col, color, ox=0, oy=0, scale=1.0, shrink=4, text=None, size=1):
         cell = int(CELL_SIZE * scale)
         x = ox + col * cell + shrink
         y = oy + row * cell + shrink
-        size = cell - shrink * 2
-        if size > 0:
-            pygame.draw.rect(self.screen, color, (x, y, size, size))
+        rect_size = cell * size - shrink * 2
+        if rect_size > 0:
+            pygame.draw.rect(self.screen, color, (x, y, rect_size, rect_size), border_radius=max(2, int(6 * scale)))
             if text:
                 t_surf = self.font_med.render(text, True, BLACK)
-                tx = x + size / 2 - t_surf.get_width() / 2
-                ty = y + size / 2 - t_surf.get_height() / 2
+                tx = x + rect_size / 2 - t_surf.get_width() / 2
+                ty = y + rect_size / 2 - t_surf.get_height() / 2
                 self.screen.blit(t_surf, (tx, ty))
 
     def _draw_overlay(self, cells, color_rgba, ox=0, oy=0, scale=1.0):
@@ -374,7 +380,7 @@ class Game:
 
         # Jugador
         pr, pc = self.grid.player_start
-        self._draw_cell(pr, pc, PLAYER_COLOR)
+        self._draw_cell(pr, pc, PLAYER_COLOR, size=PLAYER_SIZE)
 
         # Todos los enemigos
         for er, ec in self.grid.enemy_starts:
@@ -410,7 +416,7 @@ class Game:
                 self._draw_overlay(enemy.path, (color[0], color[1], color[2], 80))
 
         # Jugador (movimiento suave, SIN exclamación)
-        self._draw_cell(self.player.visual_row, self.player.visual_col, PLAYER_COLOR)
+        self._draw_cell(self.player.visual_row, self.player.visual_col, PLAYER_COLOR, size=self.player.size)
 
         # Enemigos (movimiento suave, CON exclamación si persiguen)
         for enemy in self.enemies:
@@ -466,7 +472,7 @@ class Game:
     def _draw_gameover(self, won):
         self._draw_grid()
         if self.player:
-            self._draw_cell(self.player.row, self.player.col, PLAYER_COLOR)
+            self._draw_cell(self.player.row, self.player.col, PLAYER_COLOR, size=self.player.size)
         for enemy in self.enemies:
             self._draw_cell(enemy.row, enemy.col, enemy.get_color())
 
@@ -507,8 +513,8 @@ class Game:
             return
 
         results = self.analysis_results
-        start = self.grid.player_start
-        goal = self.grid.enemy_starts[0] if self.grid.enemy_starts else (self.grid.rows - 2, self.grid.cols - 2)
+        start = self.grid.enemy_starts[0] if self.grid.enemy_starts else (self.grid.rows - 2, self.grid.cols - 2)
+        goal = self.grid.player_start
 
         title = self.font_big.render("MODO ANÁLISIS", True, WHITE)
         self.screen.blit(title, (self._win_w() // 2 - title.get_width() // 2, 10))
@@ -530,17 +536,19 @@ class Game:
             self._draw_grid(ox, oy, mini_scale)
 
             # Nodos explorados hasta el paso actual (ANIMACIÓN)
-            visible_explored = result.explored[:min(self.anim_step, len(result.explored))]
-            if visible_explored:
-                self._draw_overlay(visible_explored, (color[0], color[1], color[2], 60), ox, oy, mini_scale)
+            completed = self.anim_step >= len(result.explored)
+            if not completed:
+                visible_explored = result.explored[:min(self.anim_step, len(result.explored))]
+                if visible_explored:
+                    self._draw_overlay(visible_explored, (color[0], color[1], color[2], 55), ox, oy, mini_scale)
 
             # Mostrar camino solo cuando este algoritmo terminó de explorar
-            if self.anim_step >= len(result.explored) and result.path:
+            if completed and result.path:
                 self._draw_overlay(result.path, (color[0], color[1], color[2], 140), ox, oy, mini_scale)
 
-            # Inicio y fin
-            self._draw_cell(start[0], start[1], PLAYER_COLOR, ox, oy, mini_scale, 2)
-            self._draw_cell(goal[0], goal[1], color, ox, oy, mini_scale, 2)
+            # Inicio enemigo y meta jugador
+            self._draw_cell(start[0], start[1], color, ox, oy, mini_scale, 2)
+            self._draw_cell(goal[0], goal[1], PLAYER_COLOR, ox, oy, mini_scale, 2, size=PLAYER_SIZE)
 
             # Estadísticas debajo
             sy = oy + self.grid.rows * mini_cell + 8
@@ -548,7 +556,7 @@ class Game:
             shown = min(self.anim_step, len(result.explored))
             self.screen.blit(self.font_small.render(f"Nodos: {shown}/{result.nodes_explored}", True, GRAY), (ox, sy))
             # Camino (solo si terminó)
-            if self.anim_step >= len(result.explored):
+            if completed:
                 self.screen.blit(self.font_small.render(f"Camino: {len(result.path)}", True, color), (ox, sy + 18))
 
         # Tabla comparativa
@@ -601,9 +609,9 @@ class Game:
 
     def _start_analysis(self):
         """Calcula los 3 algoritmos y prepara la animación."""
-        # El enemigo es quien busca → parte desde su posición
+        # En analisis el enemigo busca al jugador.
         start = self.grid.enemy_starts[0] if self.grid.enemy_starts else (self.grid.rows - 2, self.grid.cols - 2)
-        goal = self.grid.player_start
+        goal = set(self.grid.entity_cells(*self.grid.player_start, PLAYER_SIZE))
 
         self.analysis_results = [
             ("DFS", dfs(self.grid, start, goal), DFS_COLOR),

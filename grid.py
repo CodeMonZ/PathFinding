@@ -11,7 +11,7 @@
 #
 # ============================================================
 
-from constants import EMPTY, WALL
+from constants import EMPTY, PLAYER_SIZE, WALL
 
 
 class Grid:
@@ -34,16 +34,47 @@ class Grid:
         """¿Se puede caminar aquí?"""
         return self.is_valid(row, col) and self.cells[row][col] != WALL
 
-    def get_neighbors(self, row, col):
+    def can_place_entity(self, row, col, size=1):
+        """True si una entidad size x size cabe completa en esa posicion."""
+        for r in range(row, row + size):
+            for c in range(col, col + size):
+                if not self.is_walkable(r, c):
+                    return False
+        return True
+
+    def entity_cells(self, row, col, size=1):
+        """Celdas ocupadas por una entidad size x size."""
+        return [
+            (r, c)
+            for r in range(row, row + size)
+            for c in range(col, col + size)
+            if self.is_valid(r, c)
+        ]
+
+    def can_move_entity(self, row, col, dr, dc, size=1):
+        """Valida movimiento en 4 direcciones para una entidad size x size."""
+        if dr != 0 and dc != 0:
+            return False
+
+        new_row = row + dr
+        new_col = col + dc
+        return self.can_place_entity(new_row, new_col, size)
+
+    def get_neighbors(self, row, col, size=1):
         """
         Vecinos caminables = ARISTAS del nodo en el grafo.
-        4 direcciones: arriba, abajo, izquierda, derecha.
+        Orden fijo en 4 direcciones: arriba, derecha, abajo, izquierda.
         """
-        directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+        directions = [
+            (-1, 0),
+            (0, 1),
+            (1, 0),
+            (0, -1),
+        ]
         neighbors = []
         for dr, dc in directions:
             nr, nc = row + dr, col + dc
-            if self.is_walkable(nr, nc):
+            if self.can_move_entity(row, col, dr, dc, size):
                 neighbors.append((nr, nc))
         return neighbors
 
@@ -106,7 +137,9 @@ class Grid:
 
         # Ajustar posiciones que queden fuera
         pr, pc = self.player_start
-        self.player_start = (min(pr, new_rows - 1), min(pc, new_cols - 1))
+        max_pr = max(0, new_rows - PLAYER_SIZE)
+        max_pc = max(0, new_cols - PLAYER_SIZE)
+        self.player_start = (min(pr, max_pr), min(pc, max_pc))
 
         valid_enemies = []
         for er, ec in self.enemy_starts:
