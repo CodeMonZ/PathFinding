@@ -9,7 +9,16 @@ CELL_SIZE = 40
 PLAYER_SIZE = 2
 
 # --- Ventana ---
-HUD_HEIGHT = 80
+WINDOW_WIDTH = 1280
+WINDOW_HEIGHT = 720
+HUD_HEIGHT = 136
+RESOLUTION_OPTIONS = [
+    (1280, 720),
+    (1366, 768),
+    (1600, 900),
+    (1920, 1080),
+]
+DEFAULT_RESOLUTION_INDEX = 3
 
 # --- Colores (R, G, B) ---
 BLACK = (10, 10, 26)
@@ -36,6 +45,12 @@ ENEMY_SPEEDS = {
     "astar": 150,
 }
 
+SPEED_LEVELS = [0.75, 1.0, 1.5, 2.0, 3.0, 5.0]
+DEFAULT_SPEED_LEVEL = 1
+MIN_ENEMY_DELAY = 45
+SURVIVAL_TIME_OPTIONS = [60, 120]
+DEFAULT_SURVIVAL_TIME_INDEX = 0
+
 # --- Recalculo del camino para A* ---
 ASTAR_RECALC_STEPS = 2
 
@@ -47,6 +62,7 @@ EMPTY = 0
 WALL = 1
 
 # --- Estados del juego ---
+STATE_INTRO = "intro"
 STATE_MENU = "menu"
 STATE_EDITOR = "editor"
 STATE_PLAYING = "playing"
