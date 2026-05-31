@@ -31,8 +31,8 @@ from pathfinding import astar
 
 
 VISION_RADIUS = 4
-LOOP_GUARD_HISTORY = 10
-LOOP_GUARD_MAX_CYCLE = 6
+LOOP_GUARD_HISTORY = 18
+LOOP_GUARD_MAX_CYCLE = 8
 
 MOVE_DIRECTIONS = [
     (-1, 0, "arriba"),

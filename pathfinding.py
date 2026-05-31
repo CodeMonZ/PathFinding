@@ -100,6 +100,24 @@ def _tree_path_between(parent, start, goal):
     return up_to_lca + down_to_goal
 
 
+def _append_trace_step(result, parent, previous, current):
+    """Agrega current a explored sin saltos visuales, retrocediendo por el arbol si hace falta."""
+    if previous is None:
+        result.explored.append(current)
+        return current
+
+    if abs(previous[0] - current[0]) + abs(previous[1] - current[1]) == 1:
+        result.explored.append(current)
+        return current
+
+    bridge = _tree_path_between(parent, previous, current)
+    if bridge:
+        result.explored.extend(bridge[1:])
+    else:
+        result.explored.append(current)
+    return current
+
+
 def heuristic(a, b):
     """Heuristica Manhattan para movimiento en 4 direcciones."""
     dy = abs(a[0] - b[0])
@@ -140,10 +158,11 @@ def dfs(grid, start, goal, size=1, explore_all=False):
     visited = {start}
     parent = {start: None}
     found_goal = None
+    previous_trace = None
 
     while stack:
         current = stack.pop()
-        result.explored.append(current)
+        previous_trace = _append_trace_step(result, parent, previous_trace, current)
 
         if current in goals and found_goal is None:
             found_goal = current
