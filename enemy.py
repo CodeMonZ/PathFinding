@@ -56,8 +56,6 @@ class Enemy:
         # DFS y Dijkstra son ciegos: solo escanean una zona local.
         self.scan_cells = []
         self.visited = {(row, col)}
-        self.visit_counts = {(row, col): 1}
-        self.recent_blind_positions = []
         self.backtrack_stack = []
         self.previous_pos = None
         self.last_player_visible = False
@@ -84,8 +82,6 @@ class Enemy:
         self.explored = [(self.row, self.col)]
         self.scan_cells = []
         self.visited = {(self.row, self.col)}
-        self.visit_counts = {(self.row, self.col): 1}
-        self.recent_blind_positions = []
         self.backtrack_stack = []
         self.previous_pos = None
         self.last_player_visible = False
@@ -176,14 +172,10 @@ class Enemy:
         self._move_one_cell(next_cell, direction)
         if player_visible:
             self._remember_visible_position()
-        else:
-            self._remember_blind_position()
 
     def _reset_blind_search(self):
         current = self.get_pos()
         self.visited = {current}
-        self.visit_counts = {current: self.visit_counts.get(current, 1)}
-        self.recent_blind_positions = []
         self.backtrack_stack = []
         self.previous_pos = None
         self.path = []
@@ -254,7 +246,6 @@ class Enemy:
             targets,
             occupied,
             avoid_previous=(mode != "Dijkstra encontro jugador"),
-            use_memory=(mode != "Dijkstra encontro jugador"),
         )
         if route_result:
             self.path = route_result["path"]
@@ -277,7 +268,6 @@ class Enemy:
                 fallback_targets,
                 occupied,
                 avoid_previous=True,
-                use_memory=True,
             )
             if route_result:
                 self.path = route_result["path"]
@@ -309,7 +299,7 @@ class Enemy:
             or abs(cell[1] - self.col) == VISION_RADIUS
         ]
 
-    def _run_local_dijkstra(self, grid, allowed, goal, occupied, use_memory=False):
+    def _run_local_dijkstra(self, grid, allowed, goal, occupied):
         start = self.get_pos()
         if start not in allowed or goal not in allowed:
             return {"path": [], "explored": []}
@@ -348,8 +338,6 @@ class Enemy:
                     continue
 
                 new_cost = current_cost + 10
-                if use_memory:
-                    new_cost += self._movement_memory_penalty(neighbor)
                 if new_cost < distances.get(neighbor, float("inf")):
                     distances[neighbor] = new_cost
                     parents[neighbor] = current
@@ -357,11 +345,10 @@ class Enemy:
                     tie_breaker += 1
 
         return {"path": [], "explored": explored}
-
-    def _first_dijkstra_route(self, grid, local_area, targets, occupied, avoid_previous, use_memory=False):
+    def _first_dijkstra_route(self, grid, local_area, targets, occupied, avoid_previous):
         fallback = None
         for target in targets:
-            result = self._run_local_dijkstra(grid, local_area, target, occupied, use_memory)
+            result = self._run_local_dijkstra(grid, local_area, target, occupied)
             if len(result["path"]) <= 1:
                 continue
             if avoid_previous and self.previous_pos is not None and result["path"][1] == self.previous_pos:
@@ -391,24 +378,13 @@ class Enemy:
         return min(abs(cell[0] - row) + abs(cell[1] - col) for row, col in player_cells)
 
     def _blind_target_rank(self, cell):
-        recent = set(self.recent_blind_positions[-6:])
         return (
-            self.visit_counts.get(cell, 0),
-            cell in recent,
             cell in self.explored,
-            -self._distance_from_start(cell),
+            self._distance_from_start(cell),
             self._direction_priority_to(cell),
             cell[0],
             cell[1],
         )
-
-    def _movement_memory_penalty(self, cell):
-        penalty = self.visit_counts.get(cell, 0) * 18
-        if cell in self.recent_blind_positions[-6:]:
-            penalty += 45
-        if cell == self.previous_pos:
-            penalty += 35
-        return penalty
 
     def _direction_priority_to(self, cell):
         dr = cell[0] - self.row
@@ -491,7 +467,6 @@ class Enemy:
         self.previous_pos = self.get_pos()
         self.row, self.col = next_cell
         self.visited.add(next_cell)
-        self.visit_counts[next_cell] = self.visit_counts.get(next_cell, 0) + 1
         self.last_direction = direction
         self._record_footstep()
 
@@ -507,11 +482,6 @@ class Enemy:
         pos = self.get_pos()
         if pos not in self.explored:
             self.explored.append(pos)
-
-    def _remember_blind_position(self):
-        self.recent_blind_positions.append(self.get_pos())
-        if len(self.recent_blind_positions) > 10:
-            self.recent_blind_positions = self.recent_blind_positions[-10:]
 
     def _update_astar(self, grid, player_pos, occupied):
         """Persecucion informada con A*."""
