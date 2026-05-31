@@ -16,6 +16,7 @@
 # ============================================================
 
 import heapq
+from collections import deque
 
 from constants import (
     ASTAR_COLOR,
@@ -58,6 +59,7 @@ class Enemy:
         self.visited = {(row, col)}
         self.backtrack_stack = []
         self.previous_pos = None
+        self.recent_positions = deque([(row, col)], maxlen=8)
         self.last_direction = "inicio"
         self.last_decision = "Escanea periferia"
 
@@ -81,6 +83,7 @@ class Enemy:
         self.visited = {(self.row, self.col)}
         self.backtrack_stack = []
         self.previous_pos = None
+        self.recent_positions = deque([(self.row, self.col)], maxlen=8)
         self.last_direction = "inicio"
         self.last_decision = "Escanea periferia"
         self.last_result = None
@@ -149,6 +152,7 @@ class Enemy:
         else:
             next_cell, direction = self._choose_dijkstra_step(grid, occupied, player_cells)
 
+        next_cell, direction = self._avoid_loop_step(grid, occupied, next_cell, direction, player_cells if player_visible else None)
         self._move_one_cell(next_cell, direction)
 
     def _scan_periphery(self, grid):
@@ -388,6 +392,46 @@ class Enemy:
         _, pos, name = min(moves, key=lambda item: (distance_to_player(item[1]), item[0]))
         return pos, name
 
+    def _avoid_loop_step(self, grid, occupied, next_cell, direction, player_cells=None):
+        if next_cell is None or not self._would_loop(next_cell):
+            return next_cell, direction
+
+        moves = self._valid_moves(grid, occupied)
+        alternatives = [
+            move for move in moves
+            if move[1] != next_cell and move[1] != self.previous_pos
+        ]
+        fresh = [move for move in alternatives if move[1] not in self.recent_positions]
+        candidates = fresh or alternatives
+        if not candidates:
+            return next_cell, direction
+
+        index, pos, name = min(candidates, key=lambda move: self._anti_loop_rank(move, player_cells))
+        self.last_decision = f"{self.last_decision} anti-bucle"
+        return pos, name
+
+    def _would_loop(self, next_cell):
+        if self.previous_pos is not None and next_cell == self.previous_pos:
+            return True
+        if len(self.recent_positions) >= 4:
+            last = list(self.recent_positions)[-4:]
+            return last[0] == last[2] and last[1] == last[3] and next_cell == last[0]
+        return False
+
+    def _anti_loop_rank(self, move, player_cells):
+        index, pos, _ = move
+        if player_cells:
+            return (
+                self._distance_to_player(pos, player_cells),
+                pos in self.recent_positions,
+                index,
+            )
+        return (
+            pos in self.recent_positions,
+            self._direction_priority_to(pos),
+            index,
+        )
+
     def _move_one_cell(self, next_cell, direction):
         if next_cell is None or next_cell == self.get_pos():
             self.last_direction = direction
@@ -401,6 +445,7 @@ class Enemy:
 
         self.previous_pos = self.get_pos()
         self.row, self.col = next_cell
+        self.recent_positions.append(next_cell)
         self.visited.add(next_cell)
         self.last_direction = direction
         self._record_footstep()
