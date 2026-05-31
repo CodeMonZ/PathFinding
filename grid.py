@@ -11,7 +11,7 @@
 #
 # ============================================================
 
-from constants import EMPTY, WALL, PLAYER_SIZE
+from constants import EMPTY, PLAYER_SIZE, WALL
 
 
 class Grid:
@@ -35,6 +35,7 @@ class Grid:
         return self.is_valid(row, col) and self.cells[row][col] != WALL
 
     def can_place_entity(self, row, col, size=1):
+        """True si una entidad size x size cabe completa en esa posicion."""
         for r in range(row, row + size):
             for c in range(col, col + size):
                 if not self.is_walkable(r, c):
@@ -42,6 +43,7 @@ class Grid:
         return True
 
     def entity_cells(self, row, col, size=1):
+        """Celdas ocupadas por una entidad size x size."""
         return [
             (r, c)
             for r in range(row, row + size)
@@ -50,25 +52,24 @@ class Grid:
         ]
 
     def can_move_entity(self, row, col, dr, dc, size=1):
+        """Valida movimiento en 4 direcciones para una entidad size x size."""
+        if dr != 0 and dc != 0:
+            return False
+
         new_row = row + dr
         new_col = col + dc
-        if not self.can_place_entity(new_row, new_col, size):
-            return False
-        if dr != 0 and dc != 0:
-            return (
-                self.can_place_entity(row + dr, col, size)
-                and self.can_place_entity(row, col + dc, size)
-            )
-        return True
+        return self.can_place_entity(new_row, new_col, size)
 
     def get_neighbors(self, row, col, size=1):
         """
         Vecinos caminables = ARISTAS del nodo en el grafo.
-        4 direcciones: arriba, abajo, izquierda, derecha.
+        Orden fijo en 4 direcciones: arriba, derecha, abajo, izquierda.
         """
         directions = [
-            (-1, 0), (1, 0), (0, -1), (0, 1),
-            (-1, -1), (-1, 1), (1, -1), (1, 1),
+            (-1, 0),
+            (0, 1),
+            (1, 0),
+            (0, -1),
         ]
         neighbors = []
         for dr, dc in directions:
