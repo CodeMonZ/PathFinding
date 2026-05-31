@@ -182,7 +182,7 @@ class Enemy:
     def _reset_blind_search(self):
         current = self.get_pos()
         self.visited = {current}
-        self.visit_counts = {current: self.visit_counts.get(current, 1)}
+        self.visit_counts[current] = self.visit_counts.get(current, 0) + 1
         self.recent_blind_positions = []
         self.backtrack_stack = []
         self.previous_pos = None
@@ -207,7 +207,10 @@ class Enemy:
     def _choose_dfs_step(self, grid, occupied):
         current = self.get_pos()
         moves = self._valid_moves(grid, occupied)
-        unvisited = [(i, pos, name) for i, pos, name in moves if pos not in self.visited]
+        unvisited = sorted(
+            [(i, pos, name) for i, pos, name in moves if pos not in self.visited],
+            key=self._dfs_move_rank,
+        )
 
         if unvisited:
             _, pos, name = unvisited[0]
@@ -223,7 +226,7 @@ class Enemy:
                 return pos, direction
 
         if moves:
-            _, pos, name = moves[0]
+            _, pos, name = min(moves, key=self._dfs_move_rank)
             self.last_decision = "DFS reinicia ciclo local"
             return pos, name
 
@@ -409,6 +412,16 @@ class Enemy:
         if cell == self.previous_pos:
             penalty += 35
         return penalty
+
+    def _dfs_move_rank(self, move):
+        index, pos, _ = move
+        recent = set(self.recent_blind_positions[-6:])
+        return (
+            self.visit_counts.get(pos, 0),
+            pos in recent,
+            pos == self.previous_pos,
+            index,
+        )
 
     def _direction_priority_to(self, cell):
         dr = cell[0] - self.row
