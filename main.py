@@ -1091,7 +1091,7 @@ class Game:
         goal = set(self.grid.entity_cells(*self.grid.player_start, PLAYER_SIZE))
 
         self.analysis_results = [
-            ("DFS", dfs(self.grid, start, goal), DFS_COLOR),
+            ("DFS", dfs(self.grid, start, goal, explore_all=True), DFS_COLOR),
             ("Dijkstra", dijkstra(self.grid, start, goal), DIJKSTRA_COLOR),
             ("A*", astar(self.grid, start, goal), ASTAR_COLOR),
         ]

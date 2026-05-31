@@ -134,13 +134,14 @@ def _dfs_neighbors(grid, start, current, size):
 # NIVEL 1: DFS (Depth-First Search)
 # ============================================================
 
-def dfs(grid, start, goal, size=1):
+def dfs(grid, start, goal, size=1, explore_all=False):
     """
     DFS real:
     - usa stack
     - marca visitado al meter en la pila
     - guarda parent
     - reconstruye el camino final solo al encontrar la meta
+    - si explore_all=True, sigue explorando todo lo alcanzable antes de mostrar el camino
     """
     result = PathResult()
     t0 = _timer()
@@ -153,16 +154,16 @@ def dfs(grid, start, goal, size=1):
     stack = [start]
     visited = {start}
     parent = {start: None}
-    found = False
+    found_goal = None
 
     while stack:
         current = stack.pop()
         result.explored.append(current)
 
-        if current in goals:
-            found = True
-            goal = current
-            break
+        if current in goals and found_goal is None:
+            found_goal = current
+            if not explore_all:
+                break
 
         # Stack = LIFO, por eso se empuja en reversa.
         for neighbor in reversed(_dfs_neighbors(grid, start, current, size)):
@@ -171,8 +172,8 @@ def dfs(grid, start, goal, size=1):
                 parent[neighbor] = current
                 stack.append(neighbor)
 
-    if found:
-        _finish(result, parent, goal)
+    if found_goal is not None:
+        _finish(result, parent, found_goal)
 
     result.time_ms = _elapsed_ms(t0)
     result.nodes_explored = len(result.explored)
