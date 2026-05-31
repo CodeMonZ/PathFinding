@@ -112,22 +112,7 @@ def _heuristic_to_goals(node, goals):
 
 
 def _dfs_neighbors(grid, start, current, size):
-    def sweep_rank(node):
-        row, col = node
-        if row < start[0]:
-            return grid.rows * grid.cols + (start[0] - row) * grid.cols + col
-        row_delta = row - start[0]
-        going_right = row_delta % 2 == 0
-        if row_delta == 0:
-            if col >= start[1]:
-                return col - start[1]
-            return grid.cols + col
-        if going_right:
-            return row_delta * grid.cols + col
-        return row_delta * grid.cols + (grid.cols - 1 - col)
-
-    neighbors = grid.get_neighbors(*current, size)
-    return sorted(neighbors, key=sweep_rank)
+    return grid.get_neighbors(*current, size)
 
 
 # ============================================================
