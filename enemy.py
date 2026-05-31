@@ -56,7 +56,6 @@ class Enemy:
         # DFS y Dijkstra son ciegos: solo escanean una zona local.
         self.scan_cells = []
         self.visited = {(row, col)}
-        self.visit_counts = {(row, col): 1}
         self.backtrack_stack = []
         self.previous_pos = None
         self.last_player_visible = False
@@ -81,7 +80,6 @@ class Enemy:
         self.explored = [(self.row, self.col)]
         self.scan_cells = []
         self.visited = {(self.row, self.col)}
-        self.visit_counts = {(self.row, self.col): 1}
         self.backtrack_stack = []
         self.previous_pos = None
         self.last_player_visible = False
@@ -149,7 +147,8 @@ class Enemy:
             if self.algorithm == "dijkstra":
                 next_cell, direction = self._choose_dijkstra_step(grid, occupied, player_cells)
             else:
-                next_cell, direction = self._choose_dfs_visible_step(grid, occupied, player_cells)
+                next_cell, direction = self._choose_step_toward_player(grid, occupied, player_cells)
+                self.last_decision = "Jugador en periferia"
         elif self.algorithm == "dfs":
             next_cell, direction = self._choose_dfs_step(grid, occupied)
         else:
@@ -181,8 +180,7 @@ class Enemy:
     def _choose_dfs_step(self, grid, occupied):
         current = self.get_pos()
         moves = self._valid_moves(grid, occupied)
-        ranked_moves = sorted(moves, key=self._blind_move_rank)
-        unvisited = [(i, pos, name) for i, pos, name in ranked_moves if pos not in self.visited]
+        unvisited = [(i, pos, name) for i, pos, name in moves if pos not in self.visited]
 
         if unvisited:
             _, pos, name = unvisited[0]
@@ -192,30 +190,18 @@ class Enemy:
 
         while self.backtrack_stack:
             pos = self.backtrack_stack.pop()
-            if pos in [move_pos for _, move_pos, _ in ranked_moves]:
+            if pos in [move_pos for _, move_pos, _ in moves]:
                 direction = self._direction_to(pos)
                 self.last_decision = "DFS retrocede"
                 return pos, direction
 
-        if ranked_moves:
-            _, pos, name = ranked_moves[0]
+        if moves:
+            _, pos, name = moves[0]
             self.last_decision = "DFS reinicia ciclo local"
             return pos, name
 
         self.last_decision = "Sin salida"
         return None, "quieto"
-
-    def _choose_dfs_visible_step(self, grid, occupied, player_cells):
-        result = self._run_local_dfs(grid, self._local_area(grid), player_cells, occupied)
-        self.scan_cells = result["explored"]
-        if len(result["path"]) > 1:
-            self.path = result["path"]
-            self.last_decision = "DFS encontro jugador"
-            next_cell = result["path"][1]
-            return next_cell, self._direction_to(next_cell)
-
-        self.last_decision = "DFS rodea obstaculo"
-        return self._choose_dfs_step(grid, occupied)
 
     def _choose_dijkstra_step(self, grid, occupied, player_cells=None):
         local_area = self._local_area(grid)
@@ -248,9 +234,6 @@ class Enemy:
             self.last_decision = mode
             next_cell = route_result["path"][1]
             return next_cell, self._direction_to(next_cell)
-
-        if mode == "Dijkstra encontro jugador":
-            return self._choose_dijkstra_step(grid, occupied, None)
 
         if mode == "Dijkstra explora frontera 4":
             fallback_targets = sorted(
@@ -343,49 +326,6 @@ class Enemy:
                     tie_breaker += 1
 
         return {"path": [], "explored": explored}
-
-    def _run_local_dfs(self, grid, allowed, goals, occupied):
-        start = self.get_pos()
-        if start not in allowed:
-            return {"path": [], "explored": []}
-
-        valid_goals = {goal for goal in goals if goal in allowed}
-        if not valid_goals:
-            return {"path": [], "explored": []}
-
-        stack = [start]
-        visited = {start}
-        parents = {start: None}
-        explored = []
-
-        while stack:
-            current = stack.pop()
-            explored.append(current)
-
-            if current in valid_goals:
-                return {
-                    "path": self._reconstruct_route(parents, current),
-                    "explored": explored,
-                }
-
-            row, col = current
-            neighbors = []
-            for dr, dc, _ in MOVE_DIRECTIONS:
-                neighbor = (row + dr, col + dc)
-                if neighbor not in allowed or neighbor in occupied:
-                    continue
-                if not grid.can_move_entity(row, col, dr, dc, 1):
-                    continue
-                neighbors.append(neighbor)
-
-            for neighbor in reversed(neighbors):
-                if neighbor not in visited:
-                    visited.add(neighbor)
-                    parents[neighbor] = current
-                    stack.append(neighbor)
-
-        return {"path": [], "explored": explored}
-
     def _first_dijkstra_route(self, grid, local_area, targets, occupied, avoid_previous):
         fallback = None
         for target in targets:
@@ -420,22 +360,11 @@ class Enemy:
 
     def _blind_target_rank(self, cell):
         return (
-            self.visit_counts.get(cell, 0),
-            cell == self.previous_pos,
-            cell in self.visited,
-            -self._distance_from_start(cell),
+            cell in self.explored,
+            self._distance_from_start(cell),
             self._direction_priority_to(cell),
             cell[0],
             cell[1],
-        )
-
-    def _blind_move_rank(self, move):
-        index, pos, _ = move
-        return (
-            self.visit_counts.get(pos, 0),
-            pos == self.previous_pos,
-            pos in self.visited,
-            index,
         )
 
     def _direction_priority_to(self, cell):
@@ -485,7 +414,6 @@ class Enemy:
         self.previous_pos = self.get_pos()
         self.row, self.col = next_cell
         self.visited.add(next_cell)
-        self.visit_counts[next_cell] = self.visit_counts.get(next_cell, 0) + 1
         self.last_direction = direction
         self._record_footstep()
 
