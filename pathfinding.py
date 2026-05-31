@@ -129,8 +129,34 @@ def _heuristic_to_goals(node, goals):
     return min(heuristic(node, goal) for goal in goals)
 
 
-def _dfs_neighbors(grid, start, current, size):
-    return grid.get_neighbors(*current, size)
+def _dfs_neighbors(grid, start, current, size, goals=None):
+    neighbors = grid.get_neighbors(*current, size)
+    if not goals:
+        return neighbors
+
+    target_col = min(goals, key=lambda node: abs(node[1] - start[1]))[1]
+    horizontal_step = -1 if target_col < start[1] else 1
+    signed_col_offset = (current[1] - start[1]) * horizontal_step
+
+    if signed_col_offset < 0:
+        target_row = min(goals, key=lambda node: abs(node[0] - current[0]))[0]
+        vertical_step = -1 if target_row < current[0] else 1
+    else:
+        vertical_step = -1 if signed_col_offset % 2 == 0 else 1
+
+    preferred = [
+        (vertical_step, 0),
+        (0, horizontal_step),
+        (-vertical_step, 0),
+        (0, -horizontal_step),
+    ]
+    priority = {direction: index for index, direction in enumerate(preferred)}
+
+    def rank(node):
+        direction = (node[0] - current[0], node[1] - current[1])
+        return priority.get(direction, len(preferred))
+
+    return sorted(neighbors, key=rank)
 
 
 # ============================================================
@@ -170,7 +196,7 @@ def dfs(grid, start, goal, size=1, explore_all=False):
                 break
 
         # Stack = LIFO, por eso se empuja en reversa.
-        for neighbor in reversed(_dfs_neighbors(grid, start, current, size)):
+        for neighbor in reversed(_dfs_neighbors(grid, start, current, size, goals)):
             if neighbor not in visited:
                 visited.add(neighbor)
                 parent[neighbor] = current
