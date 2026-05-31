@@ -31,6 +31,8 @@ from pathfinding import astar
 
 
 VISION_RADIUS = 4
+LOOP_GUARD_HISTORY = 10
+LOOP_GUARD_MAX_CYCLE = 6
 
 MOVE_DIRECTIONS = [
     (-1, 0, "arriba"),
@@ -56,10 +58,7 @@ class Enemy:
         # DFS y Dijkstra son ciegos: solo escanean una zona local.
         self.scan_cells = []
         self.visited = {(row, col)}
-        self.visit_counts = {(row, col): 1}
-        self.recent_blind_positions = []
-        self.recent_visible_positions = []
-        self.last_player_visible = False
+        self.move_history = [(row, col)]
         self.backtrack_stack = []
         self.previous_pos = None
         self.last_direction = "inicio"
@@ -83,10 +82,7 @@ class Enemy:
         self.explored = [(self.row, self.col)]
         self.scan_cells = []
         self.visited = {(self.row, self.col)}
-        self.visit_counts = {(self.row, self.col): 1}
-        self.recent_blind_positions = []
-        self.recent_visible_positions = []
-        self.last_player_visible = False
+        self.move_history = [(self.row, self.col)]
         self.backtrack_stack = []
         self.previous_pos = None
         self.last_direction = "inicio"
@@ -144,10 +140,7 @@ class Enemy:
         self.scan_cells = self._scan_periphery(grid)
         player_cells = set(grid.entity_cells(*player_pos, PLAYER_SIZE))
         player_visible = bool(player_cells.intersection(self.scan_cells))
-        if self.last_player_visible and not player_visible:
-            self._clear_visible_memory()
         self.is_alerted = player_visible
-        self.last_player_visible = player_visible
 
         if player_visible:
             if self.algorithm == "dijkstra":
@@ -155,26 +148,14 @@ class Enemy:
             else:
                 next_cell, direction = self._choose_step_toward_player(grid, occupied, player_cells)
                 self.last_decision = "Jugador en periferia"
-                next_cell, direction = self._apply_visible_antiloop(
-                    grid,
-                    occupied,
-                    player_cells,
-                    next_cell,
-                    direction,
-                )
         elif self.algorithm == "dfs":
             next_cell, direction = self._choose_dfs_step(grid, occupied)
         else:
             next_cell, direction = self._choose_dijkstra_step(grid, occupied, player_cells)
 
-        self._move_one_cell(next_cell, direction)
-        if player_visible:
-            self._remember_recent(self.recent_visible_positions, self.get_pos(), 8)
-        else:
-            self._remember_recent(self.recent_blind_positions, self.get_pos(), 10)
+        next_cell, direction = self._apply_loop_guard(grid, occupied, next_cell, direction)
 
-    def _clear_visible_memory(self):
-        self.recent_visible_positions = []
+        self._move_one_cell(next_cell, direction)
 
     def _scan_periphery(self, grid):
         return [cell for cell in self._local_area(grid) if cell != self.get_pos()]
@@ -192,10 +173,7 @@ class Enemy:
     def _choose_dfs_step(self, grid, occupied):
         current = self.get_pos()
         moves = self._valid_moves(grid, occupied)
-        unvisited = sorted(
-            [(i, pos, name) for i, pos, name in moves if pos not in self.visited],
-            key=self._blind_move_rank,
-        )
+        unvisited = [(i, pos, name) for i, pos, name in moves if pos not in self.visited]
 
         if unvisited:
             _, pos, name = unvisited[0]
@@ -211,7 +189,7 @@ class Enemy:
                 return pos, direction
 
         if moves:
-            _, pos, name = min(moves, key=self._blind_move_rank)
+            _, pos, name = moves[0]
             self.last_decision = "DFS reinicia ciclo local"
             return pos, name
 
@@ -383,71 +361,41 @@ class Enemy:
             cell[1],
         )
 
-    def _blind_move_rank(self, move):
-        index, pos, _ = move
-        recent = set(self.recent_blind_positions[-6:])
-        return (
-            self.visit_counts.get(pos, 0),
-            pos in recent,
-            pos == self.previous_pos,
-            index,
-        )
-
-    def _visible_move_score(self, move, player_cells):
-        index, pos, _ = move
-        score = self._distance_to_player(pos, player_cells)
-        if pos in self.recent_visible_positions[-6:]:
-            score += 50
-        score += self.visit_counts.get(pos, 0) * 10
-        return (score, index)
-
-    def _choose_visible_alternative(self, grid, occupied, player_cells, original_step):
-        moves = self._valid_moves(grid, occupied)
-        if not moves:
-            return None, "quieto"
-
-        base_distance = self._distance_to_player(self.get_pos(), player_cells)
-        candidates = []
-        for move in moves:
-            _, pos, _ = move
-            if pos == self.previous_pos:
-                continue
-            if original_step is not None and pos == original_step:
-                continue
-            if self._distance_to_player(pos, player_cells) <= base_distance:
-                candidates.append(move)
-
-        if not candidates:
-            candidates = [
-                move for move in moves
-                if move[1] != self.previous_pos
-                and (original_step is None or move[1] != original_step)
-            ]
-        if not candidates:
-            return original_step, self._direction_to(original_step) if original_step else "quieto"
-
-        _, pos, name = min(candidates, key=lambda move: self._visible_move_score(move, player_cells))
-        return pos, name
-
-    def _apply_visible_antiloop(self, grid, occupied, player_cells, next_cell, direction):
-        if next_cell is None:
-            return self._choose_visible_alternative(grid, occupied, player_cells, None)
-
-        recent = self.recent_visible_positions[-6:]
-        oscillates = next_cell == self.previous_pos or next_cell in recent
-        if not oscillates:
+    def _apply_loop_guard(self, grid, occupied, next_cell, direction):
+        if next_cell is None or not self._would_close_local_loop(next_cell):
             return next_cell, direction
 
-        alternative, alt_direction = self._choose_visible_alternative(
-            grid,
-            occupied,
-            player_cells,
-            next_cell,
+        moves = self._valid_moves(grid, occupied)
+        candidates = [
+            move for move in moves
+            if move[1] != next_cell
+        ]
+        if not candidates:
+            return next_cell, direction
+
+        _, escape, escape_direction = min(candidates, key=self._loop_guard_rank)
+        self.last_decision = f"{self.last_decision} + anti-bucle"
+        return escape, escape_direction
+
+    def _would_close_local_loop(self, next_cell):
+        sequence = (self.move_history + [next_cell])[-LOOP_GUARD_HISTORY:]
+        for cycle_len in range(2, LOOP_GUARD_MAX_CYCLE + 1):
+            if len(sequence) < cycle_len * 2:
+                continue
+            if sequence[-cycle_len:] == sequence[-cycle_len * 2:-cycle_len]:
+                return True
+        return False
+
+    def _loop_guard_rank(self, move):
+        index, pos, _ = move
+        recent = self.move_history[-LOOP_GUARD_HISTORY:]
+        return (
+            pos in recent,
+            pos == self.previous_pos,
+            recent.count(pos),
+            self.move_history.count(pos),
+            index,
         )
-        if alternative is not None and alternative != next_cell:
-            self.last_decision = "Evita bucle visible"
-            return alternative, alt_direction
-        return next_cell, direction
 
     def _direction_priority_to(self, cell):
         dr = cell[0] - self.row
@@ -496,8 +444,8 @@ class Enemy:
         self.previous_pos = self.get_pos()
         self.row, self.col = next_cell
         self.visited.add(next_cell)
-        self.visit_counts[next_cell] = self.visit_counts.get(next_cell, 0) + 1
         self.last_direction = direction
+        self._record_move_history(next_cell)
         self._record_footstep()
 
     def _direction_to(self, target):
@@ -513,10 +461,10 @@ class Enemy:
         if pos not in self.explored:
             self.explored.append(pos)
 
-    def _remember_recent(self, memory, pos, limit):
-        memory.append(pos)
-        if len(memory) > limit:
-            del memory[:-limit]
+    def _record_move_history(self, pos):
+        self.move_history.append(pos)
+        if len(self.move_history) > LOOP_GUARD_HISTORY * 3:
+            del self.move_history[:-(LOOP_GUARD_HISTORY * 3)]
 
     def _update_astar(self, grid, player_pos, occupied):
         """Persecucion informada con A*."""
