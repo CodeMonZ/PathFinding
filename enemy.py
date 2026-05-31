@@ -59,6 +59,8 @@ class Enemy:
         self.backtrack_stack = []
         self.previous_pos = None
         self.last_player_visible = False
+        self.visible_impulse_steps = 0
+        self.visible_recent_positions = []
         self.last_direction = "inicio"
         self.last_decision = "Escanea periferia"
 
@@ -83,6 +85,8 @@ class Enemy:
         self.backtrack_stack = []
         self.previous_pos = None
         self.last_player_visible = False
+        self.visible_impulse_steps = 0
+        self.visible_recent_positions = []
         self.last_direction = "inicio"
         self.last_decision = "Escanea periferia"
         self.last_result = None
@@ -149,12 +153,25 @@ class Enemy:
             else:
                 next_cell, direction = self._choose_step_toward_player(grid, occupied, player_cells)
                 self.last_decision = "Jugador en periferia"
+            next_cell, direction = self._break_visible_oscillation(
+                grid,
+                occupied,
+                player_cells,
+                next_cell,
+                direction,
+            )
         elif self.algorithm == "dfs":
+            self.visible_impulse_steps = 0
+            self.visible_recent_positions = []
             next_cell, direction = self._choose_dfs_step(grid, occupied)
         else:
+            self.visible_impulse_steps = 0
+            self.visible_recent_positions = []
             next_cell, direction = self._choose_dijkstra_step(grid, occupied, player_cells)
 
         self._move_one_cell(next_cell, direction)
+        if player_visible:
+            self._remember_visible_position()
 
     def _reset_blind_search(self):
         current = self.get_pos()
@@ -162,6 +179,8 @@ class Enemy:
         self.backtrack_stack = []
         self.previous_pos = None
         self.path = []
+        self.visible_impulse_steps = 0
+        self.visible_recent_positions = []
         self.last_decision = "Reinicia busqueda ciega"
 
     def _scan_periphery(self, grid):
@@ -399,6 +418,40 @@ class Enemy:
 
         _, pos, name = min(moves, key=lambda item: (distance_to_player(item[1]), item[0]))
         return pos, name
+
+    def _break_visible_oscillation(self, grid, occupied, player_cells, next_cell, direction):
+        recent = set(self.visible_recent_positions[-5:])
+        if next_cell != self.previous_pos and next_cell not in recent:
+            self.visible_impulse_steps = 0
+            return next_cell, direction
+
+        moves = [
+            (index, pos, name)
+            for index, pos, name in self._valid_moves(grid, occupied)
+            if pos != self.previous_pos and pos not in recent
+        ]
+        if not moves:
+            moves = [
+                (index, pos, name)
+                for index, pos, name in self._valid_moves(grid, occupied)
+                if pos != self.previous_pos
+            ]
+        if not moves:
+            self.visible_impulse_steps = 0
+            return next_cell, direction
+
+        def distance_to_player(pos):
+            return min(abs(pos[0] - pr) + abs(pos[1] - pc) for pr, pc in player_cells)
+
+        _, pos, name = min(moves, key=lambda item: (distance_to_player(item[1]), item[0]))
+        self.visible_impulse_steps += 1
+        self.last_decision = "Impulso en periferia"
+        return pos, name
+
+    def _remember_visible_position(self):
+        self.visible_recent_positions.append(self.get_pos())
+        if len(self.visible_recent_positions) > 8:
+            self.visible_recent_positions = self.visible_recent_positions[-8:]
 
     def _move_one_cell(self, next_cell, direction):
         if next_cell is None or next_cell == self.get_pos():
