@@ -1,6 +1,4 @@
-# ============================================================
 # grid.py — Cuadrícula y estructura de grafo
-# ============================================================
 #
 # CONCEPTO:
 #   Cada celda = NODO del grafo
@@ -8,8 +6,6 @@
 #   Obstáculos = nodos BLOQUEADOS
 #
 # Soporta MÚLTIPLES posiciones de enemigos.
-#
-# ============================================================
 
 from constants import EMPTY, PLAYER_SIZE, WALL
 

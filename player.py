@@ -1,6 +1,4 @@
-# ============================================================
 # player.py - Entidad del jugador
-# ============================================================
 
 import pygame
 from constants import ENTITY_LERP_SPEED, PLAYER_MOVE_DELAY, PLAYER_SIZE

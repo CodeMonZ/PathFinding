@@ -1,10 +1,7 @@
-# ============================================================
 # pathfinding.py - Algoritmos de busqueda en grafos
-# ============================================================
 
 import heapq
 import time as _time
-
 
 STRAIGHT_COST = 10
 
@@ -45,7 +42,7 @@ def _reconstruct_path(parent, goal):
     return path
 
 
-def _move_cost(a, b):
+def _move_cost(_a, _b):
     return STRAIGHT_COST
 
 
@@ -79,9 +76,8 @@ def _heuristic_to_goals(node, goals):
     return min(heuristic(node, goal) for goal in goals)
 
 
-# ============================================================
+
 # DFS
-# ============================================================
 
 def _dfs_neighbors(grid, current, size, visited):
     neighbors = []
@@ -146,9 +142,8 @@ def dfs(grid, start, goal, size=1, explore_all=False):
     return result
 
 
-# ============================================================
-# Dijkstra global como antes
-# ============================================================
+
+# Dijkstra
 
 def dijkstra(grid, start, goal, size=1):
     result = PathResult()
@@ -205,9 +200,8 @@ def dijkstra(grid, start, goal, size=1):
     return result
 
 
-# ============================================================
+
 # A*
-# ============================================================
 
 def astar(grid, start, goal, size=1):
     result = PathResult()
@@ -232,7 +226,7 @@ def astar(grid, start, goal, size=1):
     found = False
 
     while heap:
-        current_f, current_h, current_g, _, current = heapq.heappop(heap)
+        _, _, current_g, _, current = heapq.heappop(heap)
 
         if current in visited:
             continue
@@ -279,109 +273,3 @@ def astar(grid, start, goal, size=1):
 
     return result
 
-
-# ============================================================
-# Exploradores paso a paso
-# ============================================================
-
-class DFSExplorer:
-    def __init__(self, grid, start):
-        self.grid = grid
-        self.start = start
-        self.stack = [start]
-        self.visited = {start}
-        self.parent = {start: None}
-        self.explored = [start]
-        self.finished = False
-
-    def step(self):
-        if not self.stack:
-            self.finished = True
-            return None
-
-        current = self.stack[-1]
-        neighbors = _dfs_neighbors(self.grid, current, 1, self.visited)
-
-        if neighbors:
-            next_node = neighbors[0]
-            self.visited.add(next_node)
-            self.parent[next_node] = current
-            self.stack.append(next_node)
-
-            if next_node not in self.explored:
-                self.explored.append(next_node)
-
-            return next_node
-
-        self.stack.pop()
-
-        if not self.stack:
-            self.finished = True
-            return None
-
-        return self.stack[-1]
-
-    def reset(self, start):
-        self.start = start
-        self.stack = [start]
-        self.visited = {start}
-        self.parent = {start: None}
-        self.explored = [start]
-        self.finished = False
-
-
-class DijkstraExplorer:
-    def __init__(self, grid, start):
-        self.grid = grid
-        self.heap = [(0, 0, start)]
-        self.distances = {start: 0}
-        self.parent = {start: None}
-        self.tie_breaker = 1
-        self.visited = set()
-        self.explored = []
-        self.finished = False
-
-    def step(self):
-        while self.heap:
-            cost, _, current = heapq.heappop(self.heap)
-
-            if current in self.visited:
-                continue
-
-            if cost != self.distances.get(current, float("inf")):
-                continue
-
-            self.visited.add(current)
-            self.explored.append(current)
-
-            for neighbor in self.grid.get_neighbors(*current, 1):
-                new_cost = cost + _move_cost(current, neighbor)
-
-                if new_cost < self.distances.get(neighbor, float("inf")):
-                    self.distances[neighbor] = new_cost
-                    self.parent[neighbor] = current
-
-                    heapq.heappush(
-                        self.heap,
-                        (
-                            new_cost,
-                            self.tie_breaker,
-                            neighbor
-                        )
-                    )
-
-                    self.tie_breaker += 1
-
-            return current
-
-        self.finished = True
-        return None
-
-    def reset(self, start):
-        self.heap = [(0, 0, start)]
-        self.distances = {start: 0}
-        self.parent = {start: None}
-        self.tie_breaker = 1
-        self.visited = set()
-        self.explored = []
-        self.finished = False
