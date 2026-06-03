@@ -20,7 +20,7 @@ class Grid:
         self.player_start = (1, 1)
         self.enemy_starts = [(rows - 2, cols - 2)]  # Lista de enemigos
 
-    # ---- Consultas del grafo ----
+    #  Consultas del grafo
 
     def is_valid(self, row, col):
         """¿Está dentro del grid?"""
@@ -74,7 +74,7 @@ class Grid:
                 neighbors.append((nr, nc))
         return neighbors
 
-    # ---- Modificación ----
+    # Modificación
 
     def set_cell(self, row, col, value):
         if self.is_valid(row, col):
@@ -92,7 +92,7 @@ class Grid:
         self.cells = [[EMPTY] * self.cols for _ in range(self.rows)]
         self.enemy_starts = []
 
-    # ---- Enemigos ----
+    # Enemigos
 
     def add_enemy(self, row, col):
         """Agrega una posición de enemigo."""
@@ -116,7 +116,7 @@ class Grid:
             self.enemy_starts.append(pos)
             self.set_cell(row, col, EMPTY)
 
-    # ---- Redimensionar ----
+    # Redimensionar
 
     def resize(self, new_cols, new_rows):
         """Cambia el tamaño del mapa, manteniendo lo que quepa."""
@@ -146,7 +146,7 @@ class Grid:
         if not self.enemy_starts:
             self.enemy_starts = [(new_rows - 2, new_cols - 2)]
 
-    # ---- Mapas prediseñados ----
+    # Mapas prediseñados
 
     def load_map(self, number):
         self.clear()
