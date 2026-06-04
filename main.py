@@ -8,7 +8,7 @@ import math
 from constants import *  # noqa: F401, F403
 from grid import Grid
 from player import Player
-from enemy import Enemy
+from enemy import BOOSTED_VISION_RADIUS, Enemy, VISION_RADIUS
 from pathfinding import dfs, dijkstra, astar
 
 
@@ -20,7 +20,6 @@ class Game:
         self.fullscreen = False
         self.resolution_index = DEFAULT_RESOLUTION_INDEX
         self.windowed_size = (WINDOW_WIDTH, WINDOW_HEIGHT)
-        self.enemy_speed_level = DEFAULT_SPEED_LEVEL
         self.survival_time_index = DEFAULT_SURVIVAL_TIME_INDEX
         self._init_window()
 
@@ -35,6 +34,13 @@ class Game:
         self.show_path = True
         self.show_explored = True
         self.show_help = False
+        self.notice_text = ""
+        self.notice_color = WHITE
+        self.notice_timer = 0
+        self.confirm_action = None
+        self.confirm_title = ""
+        self.confirm_text = ""
+        self.periphery_boosted = False
 
         # Entidades
         self.player = None
@@ -113,16 +119,36 @@ class Game:
         if self.fullscreen:
             self._init_window()
 
-    def _change_enemy_speed(self, delta):
-        self.enemy_speed_level = max(0, min(len(SPEED_LEVELS) - 1, self.enemy_speed_level + delta))
-        for enemy in self.enemies:
-            enemy.speed_multiplier = SPEED_LEVELS[self.enemy_speed_level]
-
     def _change_survival_time(self, delta):
         self.survival_time_index = (self.survival_time_index + delta) % len(SURVIVAL_TIME_OPTIONS)
 
     def _selected_survival_time(self):
         return SURVIVAL_TIME_OPTIONS[self.survival_time_index]
+
+    def _show_notice(self, text, color=WHITE, duration=2200):
+        self.notice_text = text
+        self.notice_color = color
+        self.notice_timer = duration
+
+    def _request_confirm(self, action, title, text):
+        self.confirm_action = action
+        self.confirm_title = title
+        self.confirm_text = text
+
+    def _clear_confirm(self):
+        self.confirm_action = None
+        self.confirm_title = ""
+        self.confirm_text = ""
+
+    def _accept_confirm(self):
+        action = self.confirm_action
+        self._clear_confirm()
+
+        if action == "quit":
+            self.running = False
+        elif action == "menu":
+            self.show_help = False
+            self.state = STATE_MENU
 
     # ============================================================
     # LOOP PRINCIPAL
@@ -149,12 +175,15 @@ class Game:
             elif event.type == pygame.VIDEORESIZE and not self.fullscreen:
                 self.windowed_size = (max(960, event.w), max(540, event.h))
                 self._init_window()
+            elif self.confirm_action:
+                if event.type == pygame.KEYDOWN:
+                    self._ev_confirm(event)
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
                 self._toggle_fullscreen()
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_F10:
                 self._change_resolution(1)
             elif self.state == STATE_INTRO:
-                self._ev_intro(event)
+                continue
             elif self.state == STATE_MENU:
                 self._ev_menu(event)
             elif self.state == STATE_EDITOR:
@@ -166,9 +195,11 @@ class Game:
             elif self.state == STATE_ANALYSIS:
                 self._ev_analysis(event)
 
-    def _ev_intro(self, event):
-        if event.type == pygame.KEYDOWN or event.type == pygame.MOUSEBUTTONDOWN:
-            self.state = STATE_MENU
+    def _ev_confirm(self, event):
+        if event.key in (pygame.K_RETURN, pygame.K_y, pygame.K_s):
+            self._accept_confirm()
+        elif event.key in (pygame.K_ESCAPE, pygame.K_n):
+            self._clear_confirm()
 
     def _ev_menu(self, event):
         if event.type != pygame.KEYDOWN:
@@ -188,10 +219,6 @@ class Game:
         elif event.key in (pygame.K_DOWN, pygame.K_RIGHT):
             self.menu_selection = (self.menu_selection + 1) % 3
             self.algorithm = ("dfs", "dijkstra", "astar")[self.menu_selection]
-        elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
-            self._change_enemy_speed(-1)
-        elif event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
-            self._change_enemy_speed(1)
         elif event.key in (pygame.K_t, pygame.K_PAGEUP, pygame.K_PAGEDOWN):
             self._change_survival_time(1)
         elif event.key == pygame.K_RETURN:
@@ -201,7 +228,7 @@ class Game:
         elif event.key == pygame.K_TAB:
             self._start_analysis()
         elif event.key == pygame.K_ESCAPE:
-            self.running = False
+            self._request_confirm("quit", "SALIR", "Quieres cerrar el juego?")
 
     def _ev_editor(self, event):
         if event.type == pygame.KEYDOWN:
@@ -247,17 +274,13 @@ class Game:
             if self.show_help:
                 self.show_help = False
                 return
-            self.state = STATE_MENU
+            self._request_confirm("menu", "SALIR DE PARTIDA", "Volver al menu?")
         elif event.key == pygame.K_v:
             self.show_path = not self.show_path
         elif event.key == pygame.K_b:
             self.show_explored = not self.show_explored
         elif event.key == pygame.K_h:
             self.show_help = not self.show_help
-        elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
-            self._change_enemy_speed(-1)
-        elif event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
-            self._change_enemy_speed(1)
 
     def _ev_gameover(self, event):
         if event.type != pygame.KEYDOWN:
@@ -278,6 +301,10 @@ class Game:
             # Avanzar un paso manualmente
             if self.anim_step < self.anim_max:
                 self.anim_step += 1
+        elif event.key == pygame.K_LEFT:
+            # Retroceder un paso manualmente
+            if self.anim_step > 0:
+                self.anim_step -= 1
         elif event.key == pygame.K_r:
             # Reiniciar animación
             self.anim_step = 0
@@ -287,14 +314,6 @@ class Game:
             self.anim_speed = max(5, self.anim_speed - 10)
         elif event.key == pygame.K_DOWN:
             self.anim_speed = min(200, self.anim_speed + 10)
-
-    # ============================================================
-    # EDITOR HELPERS
-    # ============================================================
-
-    def _resize_map(self, cols, rows):
-        self.grid.resize(cols, rows)
-        self._init_window()
 
     def _editor_click(self, pos):
         cell_pos = self._screen_to_cell(pos)
@@ -340,6 +359,9 @@ class Game:
     # ============================================================
 
     def update(self, dt):
+        if self.notice_timer > 0:
+            self.notice_timer = max(0, self.notice_timer - dt)
+
         if self.state == STATE_INTRO:
             self.intro_timer += dt
             if self.intro_timer >= self.intro_duration:
@@ -360,6 +382,13 @@ class Game:
         if self.state != STATE_PLAYING:
             return
 
+        if self.show_help or self.confirm_action:
+            if self.player:
+                self.player.update_visual(dt)
+            for enemy in self.enemies:
+                enemy.update_visual(dt)
+            return
+
         keys = pygame.key.get_pressed()
         self.player.handle_input(keys, self.grid, dt)
         self.player.update_visual(dt)
@@ -377,9 +406,28 @@ class Game:
 
         # Timer
         self.timer -= dt / 1000.0
+        self._update_periphery_difficulty()
         if self.timer <= 0:
             self.timer = 0
             self.state = STATE_WIN
+
+    def _update_periphery_difficulty(self):
+        selected_time = self._selected_survival_time()
+
+        if self.periphery_boosted or self.timer > selected_time / 2:
+            return
+
+        blind_enemies = [enemy for enemy in self.enemies if enemy.algorithm != "astar"]
+
+        self.periphery_boosted = True
+
+        if not blind_enemies:
+            return
+
+        for enemy in blind_enemies:
+            enemy.set_vision_radius(BOOSTED_VISION_RADIUS)
+
+        self._show_notice("Periferia expandida: dificultad aumentada", ASTAR_COLOR, 2600)
 
     # ============================================================
     # DIBUJAR
@@ -402,6 +450,12 @@ class Game:
             self._draw_gameover(True)
         elif self.state == STATE_ANALYSIS:
             self._draw_analysis()
+
+        if self.notice_timer > 0 and self.state != STATE_INTRO:
+            self._draw_notice()
+
+        if self.confirm_action:
+            self._draw_confirm_overlay()
 
         pygame.display.flip()
 
@@ -469,9 +523,9 @@ class Game:
         self.screen.blit(title, (x + 24, y + 22))
         lines = [
             ("WASD / Flechas", "Mover jugador"),
+            ("H", "Pausar o cerrar controles"),
             ("V", "Mostrar u ocultar camino"),
             ("B", "Mostrar u ocultar exploracion"),
-            ("+ / -", "Ajustar velocidad del enemigo"),
             ("F11", "Pantalla completa"),
             ("ESC", "Volver al menu"),
         ]
@@ -481,8 +535,53 @@ class Game:
             self.screen.blit(self.font_small.render(desc, True, GRAY), (x + 190, yy))
             yy += 30
 
-        hint = self.font_small.render("H para cerrar", True, DARK_GRAY)
+        hint = self.font_small.render("Juego pausado", True, DARK_GRAY)
         self.screen.blit(hint, (x + w - hint.get_width() - 24, y + h - 34))
+
+    def _draw_notice(self):
+        alpha = int(230 * min(1.0, self.notice_timer / 250.0))
+        text = self.font_small.render(self.notice_text, True, self.notice_color)
+        w = min(self._win_w() - 80, max(420, text.get_width() + 56))
+        h = 54
+        x = self._win_w() // 2 - w // 2
+        y = 118
+
+        surf = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(surf, (18, 18, 42, alpha), (0, 0, w, h), border_radius=10)
+        pygame.draw.rect(surf, (*self.notice_color, alpha), (0, 0, w, h), 1, border_radius=10)
+        self.screen.blit(surf, (int(x), int(y)))
+        self.screen.blit(text, (x + w // 2 - text.get_width() // 2, y + 18))
+
+    def _draw_confirm_overlay(self):
+        overlay = pygame.Surface((self._win_w(), self._win_h()), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 170))
+        self.screen.blit(overlay, (0, 0))
+
+        w = min(560, self._win_w() - 80)
+        h = 210
+        x = self._win_w() // 2 - w // 2
+        y = self._win_h() // 2 - h // 2
+        rect = pygame.Rect(x, y, w, h)
+
+        pygame.draw.rect(self.screen, (18, 18, 42), rect, border_radius=10)
+        pygame.draw.rect(self.screen, GRID_LINE, rect, 1, border_radius=10)
+
+        title = self.font_med.render(self.confirm_title, True, WHITE)
+        text = self.font_small.render(self.confirm_text, True, GRAY)
+        self.screen.blit(title, (x + 26, y + 28))
+        self.screen.blit(text, (x + 26, y + 76))
+
+        yes_rect = pygame.Rect(x + 26, y + 128, 160, 42)
+        no_rect = pygame.Rect(x + 204, y + 128, 160, 42)
+        pygame.draw.rect(self.screen, (24, 36, 54), yes_rect, border_radius=8)
+        pygame.draw.rect(self.screen, ASTAR_COLOR, yes_rect, 1, border_radius=8)
+        pygame.draw.rect(self.screen, (24, 24, 48), no_rect, border_radius=8)
+        pygame.draw.rect(self.screen, DFS_COLOR, no_rect, 1, border_radius=8)
+
+        self.screen.blit(self.font_small.render("ENTER / S", True, ASTAR_COLOR), (yes_rect.x + 14, yes_rect.y + 6))
+        self.screen.blit(self.font_small.render("Confirmar", True, WHITE), (yes_rect.x + 14, yes_rect.y + 23))
+        self.screen.blit(self.font_small.render("ESC / N", True, DFS_COLOR), (no_rect.x + 14, no_rect.y + 6))
+        self.screen.blit(self.font_small.render("Cancelar", True, WHITE), (no_rect.x + 14, no_rect.y + 23))
 
     # ---- Menú ----
 
@@ -495,20 +594,18 @@ class Game:
         pygame.draw.rect(self.screen, DARK_BLUE, (0, self._win_h() // 2 - 2, sweep, 4))
 
         title = self.font_big.render("SIMULADOR DE PERSECUCION", True, WHITE)
-        subtitle = self.font_med.render("iniciando busqueda inteligente", True, GRAY)
-        hint = self.font_small.render("presiona cualquier tecla para continuar", True, DARK_GRAY)
+        subtitle = self.font_med.render("Cargando Experiencia Personalizada", True, GRAY)
 
         for surf, y in (
             (title, self._win_h() // 2 - 72),
-            (subtitle, self._win_h() // 2 - 26),
-            (hint, self._win_h() // 2 + 42),
+            (subtitle, self._win_h() // 2 + 46),
         ):
             fade = surf.copy()
             fade.set_alpha(alpha)
             self.screen.blit(fade, (self._win_w() // 2 - surf.get_width() // 2, y))
 
         cx = self._win_w() // 2
-        cy = self._win_h() // 2 + 12
+        cy = self._win_h() // 2 + 18
         radius = 7
         dots = [
             (cx - 54, cy, DFS_COLOR),
@@ -542,35 +639,8 @@ class Game:
             "Inteligente: te persigue con heurística",
         ]
         self._draw_menu_panels(options, descs)
-        return
-
-        y = 170
-        for i, (text, color) in enumerate(options):
-            prefix = "▶ " if i == self.menu_selection else "  "
-            c = color if i == self.menu_selection else GRAY
-            self.screen.blit(self.font_med.render(prefix + text, True, c), (180, y))
-            y += 36
-
-        self.screen.blit(self.font_small.render(descs[self.menu_selection], True, DARK_GRAY), (200, y + 5))
-        speed_text = f"Velocidad enemigo: x{SPEED_LEVELS[self.enemy_speed_level]:.2g}"
-        time_text = f"Duracion: {self._selected_survival_time()}s"
-        self.screen.blit(self.font_med.render(speed_text, True, WHITE), (180, y + 44))
-        self.screen.blit(self.font_med.render(time_text, True, WHITE), (180, y + 78))
-        self.screen.blit(self.font_small.render("+/- velocidad    T duracion    F11 pantalla completa", True, GRAY), (180, y + 112))
-
-        y = 410
-        info = [
-            "ENTER → Jugar",
-            "E     → Editor de mapas",
-            "TAB   → Modo Análisis",
-            "ESC   → Salir",
-            "",
-            f"Mapa: {self.grid.cols}x{self.grid.rows}  |  Enemigos: {len(self.grid.enemy_starts)}",
-        ]
-        for line in info:
-            c = GRAY if line else BLACK
-            self.screen.blit(self.font_small.render(line, True, c), (200, y))
-            y += 22
+        credits = self.font_small.render("Creditos: MonZ | KTronoZ", True, DARK_GRAY)
+        self.screen.blit(credits, (ww // 2 - credits.get_width() // 2, self._win_h() - 42))
 
     def _draw_menu_panels(self, options, descs):
         margin = 48
@@ -601,24 +671,19 @@ class Game:
 
         self._draw_panel(panels[1], "CONFIGURACION")
         self.screen.blit(
-            self.font_med.render(f"Velocidad x{SPEED_LEVELS[self.enemy_speed_level]:.2g}", True, WHITE),
+            self.font_med.render(f"Duracion {self._selected_survival_time()}s", True, WHITE),
             (panels[1].x + 16, panels[1].y + 48),
         )
-        self.screen.blit(self.font_small.render("+ / - ajustar", True, DARK_GRAY), (panels[1].x + 18, panels[1].y + 78))
-        self.screen.blit(
-            self.font_med.render(f"Duracion {self._selected_survival_time()}s", True, WHITE),
-            (panels[1].x + 16, panels[1].y + 116),
-        )
-        self.screen.blit(self.font_small.render("T cambiar", True, DARK_GRAY), (panels[1].x + 18, panels[1].y + 146))
+        self.screen.blit(self.font_small.render("T cambiar", True, DARK_GRAY), (panels[1].x + 18, panels[1].y + 78))
         res_w, res_h = self._selected_resolution()
         self.screen.blit(
             self.font_small.render(f"Pantalla {res_w}x{res_h}", True, GRAY),
-            (panels[1].x + 16, panels[1].y + 174),
+            (panels[1].x + 16, panels[1].y + 116),
         )
-        self.screen.blit(self.font_small.render("F10 cambiar", True, DARK_GRAY), (panels[1].x + 18, panels[1].y + 198))
+        self.screen.blit(self.font_small.render("F10 cambiar", True, DARK_GRAY), (panels[1].x + 18, panels[1].y + 140))
         self.screen.blit(
             self.font_small.render(f"Mapa {self.grid.cols}x{self.grid.rows}  |  Enemigos {len(self.grid.enemy_starts)}", True, GRAY),
-            (panels[1].x + 16, panels[1].y + 220),
+            (panels[1].x + 16, panels[1].y + 190),
         )
 
         self._draw_panel(panels[2], "ACCIONES")
@@ -650,23 +715,6 @@ class Game:
             self._draw_cell(er, ec, DFS_COLOR)
 
         self._draw_editor_hud()
-        return
-
-        # HUD
-        hy = self._hud_y()
-        pygame.draw.rect(self.screen, (15, 15, 35), (0, hy, self._win_w(), HUD_HEIGHT))
-
-        tool_text = f"Herramienta: {self.editor_tool.upper()}  |  Enemigos: {len(self.grid.enemy_starts)}"
-        self.screen.blit(self.font_small.render(tool_text, True, WHITE), (10, hy + 5))
-
-        line1 = "W=Muro  P=Jugador  O=Enemigo(+/-)  C=Limpiar  1/2/3=Mapas"
-        self.screen.blit(self.font_small.render(line1, True, GRAY), (10, hy + 24))
-
-        line2 = "Click der=Borrar  ESC/ENTER=Menú"
-        self.screen.blit(self.font_small.render(line2, True, GRAY), (10, hy + 43))
-
-        self.screen.blit(self.font_small.render("■ Jugador", True, PLAYER_COLOR), (10, hy + 62))
-        self.screen.blit(self.font_small.render("■ Enemigo", True, DFS_COLOR), (120, hy + 62))
 
     def _draw_editor_hud(self):
         hy = self._hud_y()
@@ -740,6 +788,8 @@ class Game:
                 self._draw_overlay(enemy.explored, (color[0], color[1], color[2], 30))
             if self.show_path and enemy.path:
                 self._draw_overlay(enemy.path, (color[0], color[1], color[2], 80))
+            if self.periphery_boosted and enemy.algorithm != "astar":
+                self._draw_periphery_pulse(enemy)
 
         # Jugador (movimiento suave, SIN exclamación)
         self._draw_cell(self.player.visual_row, self.player.visual_col, PLAYER_COLOR, size=self.player.size)
@@ -770,6 +820,61 @@ class Game:
         self.screen.blit(halo, (x - halo_radius, y - halo_radius + 4))
         self.screen.blit(surf, (x - surf.get_width() // 2, y - surf.get_height() // 2))
 
+    def _draw_periphery_pulse(self, enemy):
+        if enemy.algorithm == "dijkstra":
+            self._draw_dijkstra_periphery_pulse(enemy)
+            return
+
+        ox, oy, cell = self._grid_layout()
+        pulse = (math.sin(pygame.time.get_ticks() / 260.0) + 1) / 2
+        alpha = 45 + int(50 * pulse)
+        radius = enemy.get_vision_radius()
+        top = max(0, enemy.row - radius)
+        left = max(0, enemy.col - radius)
+        bottom = min(self.grid.rows - 1, enemy.row + radius)
+        right = min(self.grid.cols - 1, enemy.col + radius)
+
+        width = (right - left + 1) * cell
+        height = (bottom - top + 1) * cell
+        x = ox + left * cell
+        y = oy + top * cell
+
+        surf = pygame.Surface((max(1, width), max(1, height)), pygame.SRCALPHA)
+        pygame.draw.rect(
+            surf,
+            (*enemy.get_color(), alpha),
+            surf.get_rect(),
+            2,
+            border_radius=10,
+        )
+        self.screen.blit(surf, (int(x), int(y)))
+
+    def _draw_dijkstra_periphery_pulse(self, enemy):
+        ox, oy, cell = self._grid_layout()
+        pulse = (math.sin(pygame.time.get_ticks() / 260.0) + 1) / 2
+        alpha = 35 + int(45 * pulse)
+        border_alpha = 80 + int(75 * pulse)
+        radius = enemy.get_vision_radius()
+        color = enemy.get_color()
+
+        fill = pygame.Surface((cell, cell), pygame.SRCALPHA)
+        fill.fill((*color, alpha))
+
+        for row in range(max(0, enemy.row - radius), min(self.grid.rows, enemy.row + radius + 1)):
+            for col in range(max(0, enemy.col - radius), min(self.grid.cols, enemy.col + radius + 1)):
+                distance = abs(row - enemy.row) + abs(col - enemy.col)
+
+                if distance > radius:
+                    continue
+
+                x = ox + col * cell
+                y = oy + row * cell
+                self.screen.blit(fill, (x, y))
+
+                if distance == radius:
+                    rect = pygame.Rect(x, y, cell, cell)
+                    pygame.draw.rect(self.screen, (*color, border_alpha), rect, 2)
+
     def _draw_game_hud(self):
         hy = self._hud_y()
         pygame.draw.rect(self.screen, (12, 12, 30), (0, hy, self._win_w(), HUD_HEIGHT))
@@ -787,7 +892,9 @@ class Game:
 
         algo_text = self.enemies[0].get_algorithm_name() if self.enemies else "?"
         algo_color = self.enemies[0].get_color() if self.enemies else WHITE
-        speed = SPEED_LEVELS[self.enemy_speed_level]
+        primary_enemy = self.enemies[0] if self.enemies else None
+        radius = primary_enemy.get_vision_radius() if primary_enemy else VISION_RADIUS
+        radius_target = int(primary_enemy.vision_target_radius) if primary_enemy else VISION_RADIUS
         selected_time = self._selected_survival_time()
         timer_color = WHITE if self.timer > 10 else DFS_COLOR
 
@@ -797,9 +904,16 @@ class Game:
         direction = getattr(self.enemies[0], "last_direction", "inicio") if self.enemies else "inicio"
         self.screen.blit(self.font_small.render(f"Paso: {direction}", True, GRAY), (panels[0].x + 12, panels[0].y + 88))
 
-        self._draw_panel(panels[1], "VELOCIDAD")
-        self.screen.blit(self.font_med.render(f"x{speed:.2g}", True, WHITE), (panels[1].x + 12, panels[1].y + 34))
-        self.screen.blit(self.font_small.render("+ / - ajustar", True, GRAY), (panels[1].x + 12, panels[1].y + 66))
+        if primary_enemy and primary_enemy.algorithm == "astar":
+            self._draw_panel(panels[1], "PERSECUCION")
+            self.screen.blit(self.font_med.render("Directa", True, ASTAR_COLOR), (panels[1].x + 12, panels[1].y + 34))
+            self.screen.blit(self.font_small.render("A* sin periferia", True, GRAY), (panels[1].x + 12, panels[1].y + 66))
+        else:
+            self._draw_panel(panels[1], "PERIFERIA")
+            self.screen.blit(self.font_med.render(f"Radio {radius}", True, WHITE), (panels[1].x + 12, panels[1].y + 34))
+            phase = "Expandida" if self.periphery_boosted else "Base"
+            self.screen.blit(self.font_small.render(phase, True, ASTAR_COLOR if self.periphery_boosted else GRAY), (panels[1].x + 12, panels[1].y + 66))
+            self.screen.blit(self.font_small.render(f"Objetivo {radius_target}", True, GRAY), (panels[1].x + 12, panels[1].y + 88))
 
         self._draw_panel(panels[2], "TIEMPO")
         timer_text = self.font_med.render(f"{self.timer:.1f}s", True, timer_color)
@@ -956,7 +1070,7 @@ class Game:
             (panels[0].x + 14, panels[0].y + 72),
         )
         self.screen.blit(
-            self.font_small.render(f"Velocidad {self.anim_speed}ms", True, GRAY),
+            self.font_small.render(f"Ritmo {self.anim_speed}ms", True, GRAY),
             (panels[0].x + 14, panels[0].y + 96),
         )
 
@@ -980,13 +1094,14 @@ class Game:
         self._draw_panel(panels[2], "CONTROLES")
         controls = [
             ("SPACE", "Play/Pausa"),
-            ("DERECHA", "Paso"),
+            ("DERECHA", "Avanzar"),
+            ("IZQUIERDA", "Retroceder"),
             ("R", "Reiniciar"),
-            ("ARR/ABA", "Velocidad"),
+            ("ARR/ABA", "Ritmo"),
             ("ESC", "Menu"),
         ]
         for index, (key, desc) in enumerate(controls):
-            row_y = panels[2].y + 34 + index * 22
+            row_y = panels[2].y + 30 + index * 19
             self.screen.blit(self.font_small.render(key, True, ASTAR_COLOR), (panels[2].x + 14, row_y))
             self.screen.blit(self.font_small.render(desc, True, GRAY), (panels[2].x + 128, row_y))
 
@@ -995,15 +1110,21 @@ class Game:
     # ============================================================
 
     def _start_game(self):
+        if not self.grid.enemy_starts:
+            self._show_notice("No hay enemigos para jugar", DFS_COLOR, 2600)
+            self.state = STATE_MENU
+            return
+
         pr, pc = self.grid.player_start
         self.player = Player(pr, pc)
 
         self.enemies = []
         for er, ec in self.grid.enemy_starts:
             enemy = Enemy(er, ec, self.algorithm)
-            enemy.speed_multiplier = SPEED_LEVELS[self.enemy_speed_level]
             self.enemies.append(enemy)
 
+        self.show_help = False
+        self.periphery_boosted = False
         self.timer = self._selected_survival_time()
         self.state = STATE_PLAYING
 

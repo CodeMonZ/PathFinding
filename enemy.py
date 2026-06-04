@@ -16,6 +16,7 @@ from pathfinding import astar
 
 
 VISION_RADIUS = 4
+BOOSTED_VISION_RADIUS = 6
 LOOP_GUARD_HISTORY = 18
 LOOP_GUARD_MAX_CYCLE = 8
 
@@ -34,13 +35,14 @@ class Enemy:
         self.row = row
         self.col = col
         self.algorithm = algorithm
-        self.speed_multiplier = 1.0
         self.move_timer = 0
 
         self.visual_row = float(row)
         self.visual_col = float(col)
 
         self.scan_cells = []
+        self.vision_radius = float(VISION_RADIUS)
+        self.vision_target_radius = float(VISION_RADIUS)
         self.visited = {(row, col)}
         self.move_history = [(row, col)]
         self.backtrack_stack = []
@@ -64,6 +66,8 @@ class Enemy:
         self.is_alerted = False
         self.explored = [(self.row, self.col)]
         self.scan_cells = []
+        self.vision_radius = float(VISION_RADIUS)
+        self.vision_target_radius = float(VISION_RADIUS)
         self.visited = {(self.row, self.col)}
         self.move_history = [(self.row, self.col)]
         self.backtrack_stack = []
@@ -84,10 +88,7 @@ class Enemy:
     def get_move_delay(self):
         base_delay = ENEMY_SPEEDS.get(self.algorithm, 200)
 
-        return max(
-            MIN_ENEMY_DELAY,
-            int(base_delay / self.speed_multiplier)
-        )
+        return max(MIN_ENEMY_DELAY, base_delay)
 
     def get_algorithm_name(self):
         names = {
@@ -197,7 +198,7 @@ class Enemy:
             next_cell, direction = self._choose_dijkstra_step(
                 grid,
                 occupied,
-                player_cells
+                None
             )
 
         next_cell, direction = self._apply_loop_guard(
@@ -210,6 +211,13 @@ class Enemy:
         self._move_one_cell(next_cell, direction)
 
     def _scan_periphery(self, grid):
+        if self.algorithm == "dijkstra":
+            return [
+                cell
+                for cell in self._dijkstra_visible_area(grid)
+                if cell != self.get_pos()
+            ]
+
         return [
             cell
             for cell in self._local_area(grid)
@@ -304,7 +312,7 @@ class Enemy:
                 key=self._blind_target_rank,
             )
 
-            mode = "Dijkstra explora frontera 4"
+            mode = "Dijkstra explora frontera"
 
         route_result = self._first_dijkstra_route(
             grid,
@@ -324,7 +332,7 @@ class Enemy:
 
             return next_cell, self._direction_to(next_cell)
 
-        if mode == "Dijkstra explora frontera 4":
+        if mode == "Dijkstra explora frontera":
 
             fallback_targets = sorted(
                 [
@@ -364,20 +372,21 @@ class Enemy:
 
     def _local_area(self, grid):
         area = set()
+        radius = self.get_vision_radius()
 
         for row in range(
-            self.row - VISION_RADIUS,
-            self.row + VISION_RADIUS + 1
+            self.row - radius,
+            self.row + radius + 1
         ):
 
             for col in range(
-                self.col - VISION_RADIUS,
-                self.col + VISION_RADIUS + 1
+                self.col - radius,
+                self.col + radius + 1
             ):
 
                 if (
-                    abs(row - self.row) <= VISION_RADIUS
-                    and abs(col - self.col) <= VISION_RADIUS
+                    abs(row - self.row) <= radius
+                    and abs(col - self.col) <= radius
                     and grid.can_place_entity(row, col, 1)
                 ):
                     area.add((row, col))
@@ -385,12 +394,36 @@ class Enemy:
         return area
 
     def _local_border(self, local_area):
+        radius = self.get_vision_radius()
+
         return [
             cell
             for cell in local_area
-            if abs(cell[0] - self.row) == VISION_RADIUS
-            or abs(cell[1] - self.col) == VISION_RADIUS
+            if abs(cell[0] - self.row) == radius
+            or abs(cell[1] - self.col) == radius
         ]
+
+    def _dijkstra_visible_area(self, grid):
+        area = set()
+        radius = self.get_vision_radius()
+
+        for row in range(
+            self.row - radius,
+            self.row + radius + 1
+        ):
+
+            for col in range(
+                self.col - radius,
+                self.col + radius + 1
+            ):
+
+                if (
+                    abs(row - self.row) + abs(col - self.col) <= radius
+                    and grid.can_place_entity(row, col, 1)
+                ):
+                    area.add((row, col))
+
+        return area
 
     def _run_local_dijkstra(self, grid, allowed, goal, occupied):
         start = self.get_pos()
@@ -771,6 +804,12 @@ class Enemy:
             self.col
         )
 
+    def set_vision_radius(self, radius):
+        self.vision_target_radius = float(max(1, radius))
+
+    def get_vision_radius(self):
+        return max(1, int(round(self.vision_radius)))
+
     def update_visual(self, dt):
         amount = min(
             1.0,
@@ -784,3 +823,11 @@ class Enemy:
         self.visual_col += (
             self.col - self.visual_col
         ) * amount
+
+        radius_diff = self.vision_target_radius - self.vision_radius
+
+        if abs(radius_diff) < 0.03:
+            self.vision_radius = self.vision_target_radius
+        else:
+            radius_amount = min(1.0, 5.0 * dt / 1000.0)
+            self.vision_radius += radius_diff * radius_amount

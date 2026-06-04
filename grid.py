@@ -116,36 +116,6 @@ class Grid:
             self.enemy_starts.append(pos)
             self.set_cell(row, col, EMPTY)
 
-    # Redimensionar
-
-    def resize(self, new_cols, new_rows):
-        """Cambia el tamaño del mapa, manteniendo lo que quepa."""
-        new_cells = [[EMPTY] * new_cols for _ in range(new_rows)]
-
-        # Copiar las celdas que quepan
-        for r in range(min(self.rows, new_rows)):
-            for c in range(min(self.cols, new_cols)):
-                new_cells[r][c] = self.cells[r][c]
-
-        self.cols = new_cols
-        self.rows = new_rows
-        self.cells = new_cells
-
-        # Ajustar posiciones que queden fuera
-        pr, pc = self.player_start
-        max_pr = max(0, new_rows - PLAYER_SIZE)
-        max_pc = max(0, new_cols - PLAYER_SIZE)
-        self.player_start = (min(pr, max_pr), min(pc, max_pc))
-
-        valid_enemies = []
-        for er, ec in self.enemy_starts:
-            if er < new_rows and ec < new_cols:
-                valid_enemies.append((er, ec))
-        self.enemy_starts = valid_enemies
-
-        if not self.enemy_starts:
-            self.enemy_starts = [(new_rows - 2, new_cols - 2)]
-
     # Mapas prediseñados
 
     def load_map(self, number):
@@ -192,10 +162,10 @@ class Grid:
         self.player_start = (1, 1)
         self.enemy_starts = [(self.rows - 2, self.cols - 2)]
         wall_rows = {
-            2: list(range(2, 8)) + list(range(10, 18)),
-            5: list(range(1, 6)) + list(range(8, 14)),
-            8: list(range(3, 10)) + list(range(12, 19)),
-            11: list(range(0, 5)) + list(range(7, 16)),
+            2: list(range(3, 8)) + list(range(11, 18)),
+            5: list(range(1, 5)) + list(range(8, 14)),
+            8: list(range(3, 9)) + list(range(12, 18)),
+            11: list(range(0, 4)) + list(range(7, 15)),
         }
         for row, cols in wall_rows.items():
             if row < self.rows:
@@ -207,3 +177,6 @@ class Grid:
         for r, c in vert:
             if self.is_valid(r, c):
                 self.cells[r][c] = WALL
+
+        for r, c in self.entity_cells(*self.player_start, PLAYER_SIZE):
+            self.cells[r][c] = EMPTY

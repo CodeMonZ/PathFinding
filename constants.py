@@ -44,17 +44,12 @@ ENEMY_SPEEDS = {
     "astar": 150,
 }
 
-SPEED_LEVELS = [0.75, 1.0, 1.5, 2.0, 3.0, 5.0]
-DEFAULT_SPEED_LEVEL = 1
 MIN_ENEMY_DELAY = 45
 SURVIVAL_TIME_OPTIONS = [60, 120]
 DEFAULT_SURVIVAL_TIME_INDEX = 0
 
 # Recalculo del camino para A*
 ASTAR_RECALC_STEPS = 2
-
-# Tiempo de supervivencia (segundos)
-SURVIVAL_TIME = 60
 
 # Tipos de celda
 EMPTY = 0
